@@ -1,0 +1,4 @@
+display_name: Scope Check
+short_description: 작업 중 범위 이탈 여부와 다음 최소 액션을 점검합니다.
+default_prompt: Use $scope-check to verify the current work is still within scope.
+

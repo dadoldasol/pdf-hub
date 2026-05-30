@@ -1,0 +1,4 @@
+interface:
+  display_name: "Session Start"
+  short_description: "현재 프로젝트 상태를 파악하고 다음 작업을 정리합니다."
+  default_prompt: "Use $session-start to inspect the current project state before continuing work."

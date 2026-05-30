@@ -1,0 +1,4 @@
+display_name: Plan
+short_description: 구현 전에 작업을 작게 분해하고 검증 기준을 정합니다.
+default_prompt: Use $plan to break down the task before editing files.
+
