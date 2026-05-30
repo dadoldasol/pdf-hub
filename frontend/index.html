@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PDF Knowledge Hub</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">KH</div>
+          <div>
+            <h1>PDF Knowledge Hub</h1>
+            <p id="apiState">API 확인 중</p>
+          </div>
+        </div>
+
+        <section class="panel upload-panel">
+          <div class="panel-head">
+            <h2>PDF</h2>
+            <span id="uploadState" class="state-pill">대기</span>
+          </div>
+          <label class="file-drop">
+            <input id="pdfInput" type="file" accept="application/pdf" />
+            <span>파일 선택</span>
+            <strong id="fileName">선택된 파일 없음</strong>
+          </label>
+          <button id="uploadButton" class="primary-button" type="button">업로드</button>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>문서</h2>
+            <button id="refreshButton" class="icon-button" type="button" title="새로고침">↻</button>
+          </div>
+          <div id="documentList" class="list empty">문서 없음</div>
+        </section>
+      </aside>
+
+      <main class="workspace">
+        <section class="toolbar">
+          <div class="search-box">
+            <input id="searchInput" type="search" placeholder="IFE RDI debug" />
+            <button id="searchButton" class="primary-button" type="button">검색</button>
+          </div>
+          <div class="toolbar-meta">
+            <span id="entityCount">엔티티 0</span>
+            <span id="resultCount">결과 0</span>
+          </div>
+        </section>
+
+        <section class="content-grid">
+          <section class="panel results-panel">
+            <div class="panel-head">
+              <h2>검색 결과</h2>
+              <span id="searchState" class="state-pill">대기</span>
+            </div>
+            <div id="searchResults" class="result-list empty">검색 결과 없음</div>
+          </section>
+
+          <section class="panel entity-panel">
+            <div class="panel-head">
+              <h2>엔티티</h2>
+              <span id="selectedEntityType" class="state-pill">미선택</span>
+            </div>
+            <div id="entityList" class="entity-list empty">엔티티 없음</div>
+          </section>
+
+          <section class="panel knowledge-panel">
+            <div class="panel-head">
+              <h2>지식 카드</h2>
+              <span id="cardState" class="state-pill">대기</span>
+            </div>
+            <div id="knowledgeCard" class="knowledge-card empty">엔티티를 선택하세요</div>
+          </section>
+
+          <section class="panel graph-panel">
+            <div class="panel-head">
+              <h2>그래프</h2>
+              <span id="graphState" class="state-pill">대기</span>
+            </div>
+            <svg id="graphView" class="graph-view" role="img" aria-label="entity graph"></svg>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="pageDialog">
+      <div class="dialog-head">
+        <h2 id="pageDialogTitle">페이지</h2>
+        <button id="closeDialogButton" class="icon-button" type="button" title="닫기">×</button>
+      </div>
+      <pre id="pageText"></pre>
+    </dialog>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
+

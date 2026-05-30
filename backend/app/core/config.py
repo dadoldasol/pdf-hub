@@ -11,7 +11,13 @@ class Settings(BaseSettings):
     app_name: str = "PDF Knowledge Hub"
     app_env: str = "local"
     debug: bool = True
-    cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000", "http://localhost:5173"])
+    cors_origins: list[str] = Field(
+        default_factory=lambda: [
+            "http://localhost:3000",
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+        ]
+    )
 
     database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/pdf_hub"
     pdf_storage_dir: Path = Path("./storage/pdfs")
@@ -28,4 +34,3 @@ def get_settings() -> Settings:
 
 
 settings = get_settings()
-
