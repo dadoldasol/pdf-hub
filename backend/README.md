@@ -1,27 +1,80 @@
 # PDF Knowledge Hub Backend
 
-FastAPI backend scaffold for the PDF Knowledge Hub MVP.
+FastAPI backend for the PDF Knowledge Hub MVP.
 
-## Local setup
+## What Works
 
-```bash
+- PDF upload and local file storage
+- Processing job creation and status lookup
+- Page-level text extraction with PyMuPDF
+- Chunk creation
+- Deterministic local embeddings for MVP development
+- pgvector-based vector search
+- Rule/pattern-based entity extraction
+- Entity mentions with source page/snippet
+- Knowledge card API
+- Co-mention graph API
+
+## Local Setup
+
+From the project root, start PostgreSQL + pgvector:
+
+```powershell
+docker compose up -d postgres
+```
+
+Create backend environment:
+
+```powershell
 cd backend
+Copy-Item .env.example .env
 python -m venv .venv
-.venv\Scripts\activate
+.\.venv\Scripts\Activate.ps1
 pip install -e ".[dev]"
-copy .env.example .env
-uvicorn app.main:app --reload
+alembic upgrade head
 ```
 
-API docs:
+If `python` is not available on Windows, use an installed Python launcher or the project-specific Python executable available in your environment.
+
+## Run Server
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
+```
+
+Useful URLs:
 
 ```text
-http://localhost:8000/docs
+http://127.0.0.1:8000/health
+http://127.0.0.1:8000/docs
 ```
 
-Health check:
+## Main API Flow
 
 ```text
-GET /health
+POST /api/documents/upload
+GET  /api/jobs/{job_id}
+GET  /api/documents
+GET  /api/documents/{document_id}
+GET  /api/documents/{document_id}/pages/{page_number}
+POST /api/search
+GET  /api/entities
+GET  /api/entities/{entity_id}
+GET  /api/entities/{entity_id}/knowledge-card
+GET  /api/graph/entities/{entity_id}
 ```
+
+## Checks
+
+```powershell
+.\.venv\Scripts\pytest.exe
+.\.venv\Scripts\ruff.exe check app tests
+```
+
+## Current MVP Limits
+
+- Embeddings are deterministic local vectors, not production semantic embeddings.
+- Entity extraction is rule/pattern-based.
+- OCR, table extraction, LLM summarization, and advanced relation extraction are deferred.
+- Graph edges are generated dynamically from co-mentions rather than persisted as inferred relations.
 

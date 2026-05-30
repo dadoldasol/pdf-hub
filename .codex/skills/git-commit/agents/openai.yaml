@@ -1,0 +1,4 @@
+interface:
+  display_name: "Git Commit"
+  short_description: "변경 범위를 검토하고 안전한 Git 커밋을 준비합니다."
+  default_prompt: "Use $git-commit to prepare and review a clean commit."

@@ -133,6 +133,7 @@
   scope-check/
   end-session/
   handoff/
+  git-commit/
 ```
 
 사용 기준:
@@ -144,5 +145,6 @@
 | `scope-check` | 작업 중 MVP/요청 범위에서 벗어났는지 점검할 때 |
 | `end-session` | 세션 종료 전 짧은 상태 요약을 남길 때 |
 | `handoff` | 다음 세션이 바로 이어받을 수 있는 상세 스냅샷이 필요할 때 |
+| `git-commit` | 변경사항을 검토하고 명시 승인 후 안전하게 커밋할 때 |
 
 스킬은 보조 절차다. 실제 구현 범위와 우선순위는 항상 `docs/mvp-scope.md`, `docs/implementation-plan.md`, 최신 사용자 요청을 우선한다.
