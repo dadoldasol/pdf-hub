@@ -380,3 +380,39 @@ MVP:
 - Prometheus/Grafana
 - alerting
 
+## MVP 이후 보완: 지식 정제 Pipeline
+
+브라우저 검증 결과, entity/knowledge card/graph 화면에서 다음 문제가 확인되었다.
+
+- 필요하지 않은 entity 후보가 많이 노출된다.
+- knowledge card가 chunk 원문 중심이라 개념 설명으로 부족하다.
+- graph가 co-mention 중심이라 edge가 많고 관계 의미가 약하다.
+
+따라서 MVP 이후 구현은 다음 pipeline을 우선 보완한다.
+
+```text
+section-aware chunking
+  -> entity candidate extraction
+  -> entity normalization/filtering/ranking
+  -> LLM entity validation
+  -> entity-centric context aggregation
+  -> knowledge card generation
+  -> typed relation extraction
+  -> graph API/UI filtering
+```
+
+우선순위:
+
+1. `entity_extraction_service`에서 stopword, type allowlist, confidence, ranking을 개선한다.
+2. `entity_service`에서 entity별 context aggregation과 knowledge card summary를 생성한다.
+3. `ingestion_worker`에서 LLM 기반 entity validation/card/relation 생성 단계를 추가한다.
+4. `graph_service`에서 co-mention 중심 응답을 typed edge, confidence, evidence 중심으로 바꾼다.
+5. frontend entity/card/graph UI에서 filter, summary, evidence, edge 설명을 제공한다.
+
+상세 기준은 다음 문서를 따른다.
+
+- `docs/backend/ingestion-pipeline.md`
+- `docs/llm/extraction-pipeline.md`
+- `docs/graph/graph-model.md`
+- `docs/frontend/ui-requirements.md`
+- `docs/frontend/graph-view.md`

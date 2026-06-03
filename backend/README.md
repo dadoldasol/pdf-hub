@@ -67,6 +67,35 @@ Open:
 http://127.0.0.1:5173
 ```
 
+## LLM Entity Validation
+
+Entity extraction uses rule/pattern candidates by default. To validate candidates with an LLM, set:
+
+```env
+ENABLE_LLM_ENTITY_VALIDATION=true
+LLM_PROVIDER=ollama
+ENTITY_VALIDATION_MODEL=qwen3:8b
+OLLAMA_BASE_URL=http://localhost:11434
+OPENAI_API_KEY=ollama
+```
+
+For local Ollama, install and pull the recommended 8B model:
+
+```powershell
+ollama pull qwen3:8b
+ollama run qwen3:8b
+```
+
+`OPENAI_API_KEY` is ignored by Ollama, but can remain set to `ollama` for compatibility. To use OpenAI instead:
+
+```env
+ENABLE_LLM_ENTITY_VALIDATION=true
+LLM_PROVIDER=openai
+OPENAI_API_KEY=your-api-key
+ENTITY_VALIDATION_MODEL=gpt-4o-mini
+OPENAI_BASE_URL=https://api.openai.com/v1
+```
+
 ## Main API Flow
 
 ```text
@@ -93,6 +122,6 @@ GET  /api/graph/entities/{entity_id}
 ## Current MVP Limits
 
 - Embeddings are deterministic local vectors, not production semantic embeddings.
-- Entity extraction is rule/pattern-based.
+- Entity extraction starts with rule/pattern candidates; optional LLM validation can filter and classify candidates.
 - OCR, table extraction, LLM summarization, and advanced relation extraction are deferred.
 - Graph edges are generated dynamically from co-mentions rather than persisted as inferred relations.

@@ -1,5 +1,6 @@
 import re
 from dataclasses import dataclass
+from typing import Self
 
 
 @dataclass(frozen=True)
@@ -10,15 +11,88 @@ class EntityCandidate:
     confidence: float
     source: str
     snippet: str
+    description: str | None = None
+    aliases: tuple[str, ...] = ()
+    validation_source: str = "rule"
+
+    def with_validation(
+        self,
+        *,
+        name: str | None = None,
+        normalized_name: str | None = None,
+        entity_type: str | None = None,
+        confidence: float | None = None,
+        description: str | None = None,
+        aliases: tuple[str, ...] | None = None,
+        validation_source: str = "llm",
+    ) -> Self:
+        return EntityCandidate(
+            name=name or self.name,
+            normalized_name=normalized_name or self.normalized_name,
+            entity_type=entity_type or self.entity_type,
+            confidence=self.confidence if confidence is None else confidence,
+            source=self.source,
+            snippet=self.snippet,
+            description=description,
+            aliases=aliases or self.aliases,
+            validation_source=validation_source,
+        )
 
 
 class EntityExtractionService:
+    DOMAIN_ACRONYMS: set[str] = {
+        "BPS",
+        "CPAS",
+        "CSI",
+        "CSID",
+        "HAL",
+        "IFE",
+        "IPE",
+        "ISP",
+        "RDI",
+        "SOF",
+        "VFE",
+    }
+    BLOCKED_TERMS: set[str] = {
+        "API",
+        "CPU",
+        "DOC",
+        "FAQ",
+        "GPU",
+        "HTML",
+        "HTTP",
+        "HTTPS",
+        "ID",
+        "JSON",
+        "MVP",
+        "PDF",
+        "SDK",
+        "SQL",
+        "TODO",
+        "URL",
+        "USB",
+        "XML",
+    }
+    ENTITY_TYPE_PRIORITY: dict[str, int] = {
+        "ISP_BLOCK": 0,
+        "CAMERA_HAL": 1,
+        "KERNEL_DRIVER": 2,
+        "CHIPSET": 3,
+        "CODE_FILE": 4,
+        "FUNCTION": 5,
+        "FEATURE": 6,
+        "DEBUG_KEYWORD": 7,
+        "CANDIDATE_TERM": 9,
+    }
     KNOWN_TERMS: dict[str, tuple[str, float]] = {
         "IFE": ("ISP_BLOCK", 0.95),
         "BPS": ("ISP_BLOCK", 0.95),
         "IPE": ("ISP_BLOCK", 0.95),
         "CSID": ("ISP_BLOCK", 0.95),
         "VFE": ("ISP_BLOCK", 0.9),
+        "CPAS": ("ISP_BLOCK", 0.9),
+        "CSI": ("ISP_BLOCK", 0.85),
+        "DMA": ("FEATURE", 0.75),
         "RDI": ("FEATURE", 0.85),
         "ISP": ("ISP_BLOCK", 0.85),
         "HAL": ("CAMERA_HAL", 0.85),
@@ -71,7 +145,14 @@ class EntityExtractionService:
                     end=match.end(),
                 )
 
-        return sorted(candidates.values(), key=lambda candidate: candidate.normalized_name)
+        return sorted(
+            candidates.values(),
+            key=lambda candidate: (
+                -candidate.confidence,
+                self.ENTITY_TYPE_PRIORITY.get(candidate.entity_type, 99),
+                candidate.normalized_name,
+            ),
+        )
 
     def normalize_name(self, name: str) -> str:
         return re.sub(r"\s+", " ", name.strip()).upper()
@@ -88,6 +169,9 @@ class EntityExtractionService:
         end: int,
     ) -> None:
         normalized_name = self.normalize_name(name)
+        if not self._is_allowed_candidate(normalized_name, entity_type):
+            return
+
         existing = candidates.get(normalized_name)
         if existing is not None and existing.confidence >= confidence:
             return
@@ -106,3 +190,17 @@ class EntityExtractionService:
         snippet_end = min(end + context, len(text))
         return " ".join(text[snippet_start:snippet_end].split())
 
+    def _is_allowed_candidate(self, normalized_name: str, entity_type: str) -> bool:
+        if not normalized_name or normalized_name in self.BLOCKED_TERMS:
+            return False
+
+        if len(normalized_name) < 3 and entity_type not in {"CODE_FILE", "CHIPSET"}:
+            return False
+
+        if entity_type == "CANDIDATE_TERM":
+            if normalized_name not in self.DOMAIN_ACRONYMS:
+                return False
+            if sum(character.isdigit() for character in normalized_name) > 1:
+                return False
+
+        return True

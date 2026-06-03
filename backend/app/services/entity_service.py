@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
 from app.models.document import Document
@@ -13,7 +13,14 @@ class EntityService:
         self.db = db
 
     def list_entities(self) -> list[Entity]:
-        return list(self.db.scalars(select(Entity).order_by(Entity.normalized_name.asc())))
+        mention_count = func.count(EntityMention.id).label("mention_count")
+        stmt = (
+            select(Entity)
+            .outerjoin(EntityMention, EntityMention.entity_id == Entity.id)
+            .group_by(Entity.id)
+            .order_by(desc(Entity.confidence).nullslast(), desc(mention_count), Entity.normalized_name.asc())
+        )
+        return list(self.db.scalars(stmt))
 
     def get_entity(self, entity_id: UUID) -> Entity | None:
         return self.db.get(Entity, entity_id)

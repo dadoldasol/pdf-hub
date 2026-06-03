@@ -30,6 +30,12 @@ class Settings(BaseSettings):
     ingestion_batch_chunks: int = 50
     enable_embeddings_on_upload: bool = True
     pdf_text_extraction_mode: str = "blocks"
+    llm_provider: str = "openai"
+    enable_llm_entity_validation: bool = False
+    entity_validation_batch_size: int = 20
+    entity_validation_model: str | None = None
+    openai_base_url: str = "https://api.openai.com/v1"
+    ollama_base_url: str = "http://localhost:11434"
 
 
 @lru_cache

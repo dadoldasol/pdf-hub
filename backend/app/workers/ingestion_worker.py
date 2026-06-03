@@ -16,6 +16,7 @@ from app.models.graph import KnowledgeNode
 from app.models.job import ProcessingJob
 from app.services.embedding_service import EmbeddingService
 from app.services.entity_extraction_service import EntityCandidate, EntityExtractionService
+from app.services.entity_validation_service import EntityValidationService
 from app.services.pdf_processing_service import PdfProcessingService
 
 
@@ -116,6 +117,9 @@ def _start_job(job: ProcessingJob) -> None:
         "total_chunks": 0,
         "processed_chunks": 0,
         "entity_mentions": 0,
+        "entity_candidates": 0,
+        "entities_accepted": 0,
+        "entities_rejected": 0,
     }
 
 
@@ -238,12 +242,25 @@ def _extract_entities(db: Session, job: ProcessingJob, document_id: UUID, chunk_
     db.commit()
 
     extraction_service = EntityExtractionService()
+    validation_service = EntityValidationService()
     processed_chunks = 0
     entity_mentions = 0
+    entity_candidates = 0
+    entities_accepted = 0
+    entities_rejected = 0
+    validation_errors: list[str] = []
     for chunk_batch in _iter_chunk_batches(db, document_id, settings.ingestion_batch_chunks):
         _raise_if_canceled(db, job)
         for chunk_row in chunk_batch:
-            for candidate in extraction_service.extract(chunk_row.text):
+            candidates = extraction_service.extract(chunk_row.text)
+            entity_candidates += len(candidates)
+            validation_result = validation_service.validate_candidates(candidates, chunk_row.text)
+            entities_accepted += len(validation_result.accepted_candidates)
+            entities_rejected += validation_result.rejected_count
+            if validation_result.error_message:
+                validation_errors.append(validation_result.error_message)
+
+            for candidate in validation_result.accepted_candidates:
                 entity = _get_or_create_entity(db, candidate)
                 _get_or_create_knowledge_node(db, entity)
                 db.add(
@@ -254,7 +271,10 @@ def _extract_entities(db: Session, job: ProcessingJob, document_id: UUID, chunk_
                         page_number=chunk_row.page_number,
                         snippet=candidate.snippet,
                         confidence=candidate.confidence,
-                        extra_metadata={"source": candidate.source},
+                        extra_metadata={
+                            "source": candidate.source,
+                            "validation_source": candidate.validation_source,
+                        },
                     )
                 )
                 entity_mentions += 1
@@ -265,6 +285,10 @@ def _extract_entities(db: Session, job: ProcessingJob, document_id: UUID, chunk_
             "extracting_knowledge",
             processed_chunks=processed_chunks,
             entity_mentions=entity_mentions,
+            entity_candidates=entity_candidates,
+            entities_accepted=entities_accepted,
+            entities_rejected=entities_rejected,
+            entity_validation_errors=validation_errors[-3:],
         )
         db.commit()
         _raise_if_canceled(db, job)
@@ -333,15 +357,29 @@ def _get_or_create_entity(db: Session, candidate: EntityCandidate) -> Entity:
         )
     )
     if entity is not None:
+        if candidate.description and not entity.description:
+            entity.description = candidate.description
+        if entity.confidence is None or candidate.confidence > entity.confidence:
+            entity.confidence = candidate.confidence
+        metadata = dict(entity.extra_metadata or {})
+        aliases = set(metadata.get("aliases") or [])
+        aliases.update(candidate.aliases)
+        metadata["aliases"] = sorted(aliases)
+        metadata["validation_source"] = candidate.validation_source
+        entity.extra_metadata = metadata
         return entity
 
     entity = Entity(
         entity_type=candidate.entity_type,
         name=candidate.name,
         normalized_name=candidate.normalized_name,
-        description=None,
+        description=candidate.description,
         confidence=candidate.confidence,
-        extra_metadata={"source": candidate.source},
+        extra_metadata={
+            "source": candidate.source,
+            "validation_source": candidate.validation_source,
+            "aliases": list(candidate.aliases),
+        },
     )
     db.add(entity)
     db.flush()
