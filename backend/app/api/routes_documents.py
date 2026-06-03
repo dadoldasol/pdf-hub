@@ -1,10 +1,16 @@
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Response, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.schemas.document import DocumentDetail, DocumentListItem, DocumentUploadResponse, PageDetail
+from app.schemas.document import (
+    DocumentDeleteResponse,
+    DocumentDetail,
+    DocumentListItem,
+    DocumentUploadResponse,
+    PageDetail,
+)
 from app.services.document_service import DocumentService
 from app.workers.ingestion_worker import run_ingestion_job
 
@@ -14,6 +20,7 @@ router = APIRouter()
 @router.post("/upload", response_model=DocumentUploadResponse, status_code=status.HTTP_201_CREATED)
 async def upload_document(
     background_tasks: BackgroundTasks,
+    response: Response,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ) -> DocumentUploadResponse:
@@ -21,7 +28,20 @@ async def upload_document(
         raise HTTPException(status_code=400, detail="Only PDF uploads are supported.")
 
     service = DocumentService(db)
-    document, job = await service.create_document_from_upload(file)
+    document, job, duplicate = await service.create_document_from_upload(file)
+    if duplicate:
+        response.status_code = status.HTTP_200_OK
+        return DocumentUploadResponse(
+            document_id=document.id,
+            job_id=None,
+            status="already_exists",
+            duplicate=True,
+            duplicate_of_document_id=document.id,
+        )
+
+    if job is None:
+        raise HTTPException(status_code=500, detail="Processing job was not created.")
+
     background_tasks.add_task(run_ingestion_job, job.id)
     return DocumentUploadResponse(document_id=document.id, job_id=job.id, status=job.status)
 
@@ -49,3 +69,11 @@ def get_document_page(
     if page is None:
         raise HTTPException(status_code=404, detail="Page not found.")
     return page
+
+
+@router.delete("/{document_id}", response_model=DocumentDeleteResponse)
+def delete_document(document_id: UUID, db: Session = Depends(get_db)) -> DocumentDeleteResponse:
+    deleted = DocumentService(db).delete_document(document_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Document not found.")
+    return DocumentDeleteResponse(document_id=document_id, deleted=True)

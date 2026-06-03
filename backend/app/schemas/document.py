@@ -6,8 +6,15 @@ from pydantic import BaseModel, ConfigDict
 
 class DocumentUploadResponse(BaseModel):
     document_id: UUID
-    job_id: UUID
+    job_id: UUID | None = None
     status: str
+    duplicate: bool = False
+    duplicate_of_document_id: UUID | None = None
+
+
+class DocumentDeleteResponse(BaseModel):
+    document_id: UUID
+    deleted: bool
 
 
 class DocumentListItem(BaseModel):
@@ -25,6 +32,7 @@ class DocumentDetail(DocumentListItem):
     storage_path: str
     content_type: str | None
     file_size_bytes: int
+    file_hash: str | None = None
     summary: str | None
 
 
@@ -36,4 +44,3 @@ class PageDetail(BaseModel):
     page_number: int
     text: str
     needs_ocr: bool
-

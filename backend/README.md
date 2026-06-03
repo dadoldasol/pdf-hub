@@ -5,6 +5,8 @@ FastAPI backend for the PDF Knowledge Hub MVP.
 ## What Works
 
 - PDF upload and local file storage
+- Duplicate PDF upload detection by SHA-256 file hash
+- Document deletion with local file and document-scoped data cleanup
 - Processing job creation and status lookup
 - Page-level text extraction with PyMuPDF
 - Chunk creation
@@ -105,6 +107,7 @@ POST /api/jobs/{job_id}/cancel
 GET  /api/documents
 GET  /api/documents/{document_id}
 GET  /api/documents/{document_id}/pages/{page_number}
+DELETE /api/documents/{document_id}
 POST /api/search
 GET  /api/entities
 GET  /api/entities/{entity_id}

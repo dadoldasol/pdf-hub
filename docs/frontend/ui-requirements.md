@@ -114,6 +114,24 @@ Graph edge:
 - `evidence_snippet`
 - `extraction_method`
 
+## Document Lifecycle UI
+
+문서 목록은 업로드된 문서를 관리할 수 있어야 한다.
+
+요구사항:
+
+- 각 document row에 삭제 버튼을 제공한다.
+- 삭제 전 확인 dialog를 표시한다.
+- 삭제 후 document list, entity list, search result를 새로고침한다.
+- 중복 업로드 응답을 받으면 새 job progress를 시작하지 않고 "이미 등록된 문서" 상태를 표시한다.
+- 중복 문서가 있으면 기존 document title/status를 사용자가 확인할 수 있어야 한다.
+- processing 중인 문서 삭제는 허용하되, 삭제 후 목록에서 즉시 사라져야 한다.
+
+Future work:
+
+- reprocess 버튼을 제공한다.
+- 삭제된 문서를 복구해야 하는 요구가 생기면 soft delete UI를 검토한다.
+
 ## 구현 우선순위
 
 1. entity 목록에 confidence/type/mention 기반 필터를 추가한다.

@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import Boolean, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -9,12 +9,21 @@ from app.models.mixins import Base, CreatedAtMixin, MetadataMixin, TimestampMixi
 
 class Document(UUIDPrimaryKeyMixin, TimestampMixin, MetadataMixin, Base):
     __tablename__ = "documents"
+    __table_args__ = (
+        Index(
+            "uq_documents_file_hash",
+            "file_hash",
+            unique=True,
+            postgresql_where=text("file_hash IS NOT NULL"),
+        ),
+    )
 
     title: Mapped[str] = mapped_column(String(255))
     original_filename: Mapped[str] = mapped_column(String(255))
     storage_path: Mapped[str] = mapped_column(String(1024))
     content_type: Mapped[str | None] = mapped_column(String(128), nullable=True)
     file_size_bytes: Mapped[int] = mapped_column(Integer)
+    file_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     page_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="uploaded")
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)

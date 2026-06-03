@@ -38,6 +38,42 @@ POST /api/documents/upload
 12. job 완료
 ```
 
+## Document Lifecycle 전처리
+
+업로드는 ingestion job 생성 전에 중복 문서 여부를 먼저 확인한다.
+
+```text
+upload request
+  -> save PDF to local storage while calculating SHA-256
+  -> check documents.file_hash
+  -> if duplicate:
+       delete newly saved duplicate file
+       return existing document with duplicate=true
+  -> if new:
+       create document
+       create processing job
+       run ingestion worker
+```
+
+중복 기준:
+
+- filename이 아니라 SHA-256 file content hash를 사용한다.
+- 중복이면 새 page/chunk/entity/job을 만들지 않는다.
+- 사용자는 기존 document로 이동할 수 있어야 한다.
+
+삭제 흐름:
+
+```text
+DELETE /api/documents/{document_id}
+  -> mark active jobs cancel_requested
+  -> delete document-scoped graph edges
+  -> delete entity mentions
+  -> delete chunks/pages/jobs
+  -> delete original PDF file
+  -> delete document row
+  -> remove orphan entities/nodes
+```
+
 ## 손봐야 할 단계
 
 ### 1. Chunking

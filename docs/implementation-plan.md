@@ -416,3 +416,33 @@ section-aware chunking
 - `docs/graph/graph-model.md`
 - `docs/frontend/ui-requirements.md`
 - `docs/frontend/graph-view.md`
+
+## Post-MVP Document Lifecycle
+
+브라우저 검증 중 문서가 삭제되지 않고, 같은 PDF를 다시 업로드하면 동일 내용이 중복 저장되는 문제가 확인되었다.
+
+우선 구현 범위:
+
+```text
+upload
+  -> calculate file hash
+  -> deduplicate by documents.file_hash
+  -> process only new documents
+  -> allow hard delete
+```
+
+구현 항목:
+
+1. `documents.file_hash` column과 unique index를 추가한다.
+2. PDF 저장 시 SHA-256 hash를 계산한다.
+3. 같은 hash의 document가 있으면 새 job을 만들지 않고 기존 document를 반환한다.
+4. `DELETE /api/documents/{document_id}`를 추가한다.
+5. 삭제 시 original PDF, jobs, pages, chunks, mentions, document-scoped graph edges를 정리한다.
+6. mention이 남지 않은 orphan entity와 knowledge node를 정리한다.
+7. frontend document list에 delete action과 duplicate upload 안내를 추가한다.
+
+Future work:
+
+- `POST /api/documents/{document_id}/reprocess`
+- soft delete / restore
+- 기존 DB의 file hash backfill script

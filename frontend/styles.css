@@ -353,6 +353,14 @@ input[type="search"] {
   font-weight: 700;
 }
 
+.item .item-delete {
+  justify-self: start;
+  width: auto;
+  padding: 4px 10px;
+  border: 1px solid #f1b8b3;
+  background: #fff5f4;
+}
+
 .item-meta,
 .result-meta,
 .entity-meta,

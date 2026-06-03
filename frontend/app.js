@@ -120,6 +120,10 @@ function renderDocuments() {
       <div class="item-title">${escapeHtml(documentItem.title)}</div>
       <div class="item-meta">${escapeHtml(documentItem.status)} · ${documentItem.page_count ?? 0}p · ${formatDate(documentItem.created_at)}</div>
     `;
+    row.insertAdjacentHTML("beforeend", '<button class="item-delete danger-button" type="button">삭제</button>');
+    row.querySelector(".item-delete").addEventListener("click", () => {
+      deleteDocument(documentItem.id, documentItem.title);
+    });
     el.documentList.append(row);
   }
 }
@@ -163,6 +167,15 @@ async function uploadSelectedFile() {
       method: "POST",
       body,
     });
+    if (result.duplicate) {
+      state.activeJobId = null;
+      el.jobProgress.hidden = true;
+      setText(el.uploadState, "이미 등록됨");
+      el.progressText.textContent = "같은 PDF가 이미 등록되어 새 작업을 만들지 않았습니다.";
+      await refreshAll();
+      return;
+    }
+
     state.activeJobId = result.job_id;
     renderJobProgress({ status: result.status, extra_metadata: {} });
     setText(el.uploadState, "처리 중");
@@ -188,6 +201,22 @@ async function waitForJob(jobId) {
     await delay(1200);
   }
   return null;
+}
+
+async function deleteDocument(documentId, title) {
+  const confirmed = window.confirm(`문서를 삭제할까요?\n\n${title}`);
+  if (!confirmed) return;
+
+  try {
+    await api(`/api/documents/${documentId}`, { method: "DELETE" });
+    state.activeJobId = null;
+    el.jobProgress.hidden = true;
+    setText(el.uploadState, "삭제됨");
+    await refreshAll();
+  } catch (error) {
+    setText(el.uploadState, "삭제 실패");
+    el.progressText.textContent = error.message || "문서 삭제 실패";
+  }
 }
 
 async function cancelActiveJob() {
