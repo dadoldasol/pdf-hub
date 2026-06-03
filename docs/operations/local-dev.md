@@ -9,7 +9,7 @@ MVP 단계에서는 Docker Compose로 PostgreSQL + pgvector를 실행하고, bac
 ```text
 PostgreSQL + pgvector: Docker Compose
 FastAPI backend: local Python venv
-Frontend: 추후 local Node.js dev server
+Frontend: local Node.js static server
 ```
 
 ## 2. 필요 도구
@@ -18,6 +18,7 @@ Frontend: 추후 local Node.js dev server
 |---|---|
 | Docker Desktop | PostgreSQL + pgvector 실행 |
 | Python 3.11+ | FastAPI backend 실행 |
+| Node.js | Frontend static server 실행 |
 | PowerShell | Windows 로컬 명령 실행 |
 | PostgreSQL client 선택 | DB 접속 확인용. 없어도 backend migration은 가능 |
 
@@ -115,18 +116,36 @@ alembic upgrade head
 
 ## 8. Backend 실행
 
+backend 디렉토리에서 실행한다.
+
 ```powershell
-uvicorn app.main:app --reload
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
 ```
 
 확인:
 
 ```text
-http://localhost:8000/health
-http://localhost:8000/docs
+http://127.0.0.1:8000/health
+http://127.0.0.1:8000/docs
 ```
 
-## 9. 종료
+## 9. Frontend 실행
+
+프로젝트 루트에서 실행한다.
+
+```powershell
+node frontend\server.js
+```
+
+확인:
+
+```text
+http://127.0.0.1:5173
+```
+
+backend 또는 frontend를 재실행하려면 해당 터미널에서 `Ctrl+C`로 중지한 뒤 같은 명령을 다시 실행한다.
+
+## 10. 종료
 
 DB 컨테이너 중지:
 

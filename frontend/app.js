@@ -4,6 +4,7 @@ const state = {
   documents: [],
   entities: [],
   selectedEntityId: null,
+  activeJobId: null,
 };
 
 const el = {
@@ -12,6 +13,11 @@ const el = {
   pdfInput: document.querySelector("#pdfInput"),
   fileName: document.querySelector("#fileName"),
   uploadButton: document.querySelector("#uploadButton"),
+  jobProgress: document.querySelector("#jobProgress"),
+  progressFill: document.querySelector("#progressFill"),
+  progressText: document.querySelector("#progressText"),
+  cancelJobButton: document.querySelector("#cancelJobButton"),
+  jobSteps: document.querySelector("#jobSteps"),
   refreshButton: document.querySelector("#refreshButton"),
   documentList: document.querySelector("#documentList"),
   searchInput: document.querySelector("#searchInput"),
@@ -31,6 +37,16 @@ const el = {
   pageText: document.querySelector("#pageText"),
   closeDialogButton: document.querySelector("#closeDialogButton"),
 };
+
+const JOB_STEPS = [
+  { status: "queued", label: "대기" },
+  { status: "extracting_pdf", label: "PDF 텍스트 추출" },
+  { status: "chunking", label: "청크 생성" },
+  { status: "embedding", label: "임베딩 생성" },
+  { status: "extracting_knowledge", label: "엔티티 추출" },
+  { status: "completed", label: "완료" },
+  { status: "canceled", label: "중지됨" },
+];
 
 function api(path, options = {}) {
   return fetch(`${API_BASE}${path}`, options).then(async (response) => {
@@ -147,25 +163,124 @@ async function uploadSelectedFile() {
       method: "POST",
       body,
     });
+    state.activeJobId = result.job_id;
+    renderJobProgress({ status: result.status, extra_metadata: {} });
     setText(el.uploadState, "처리 중");
-    await waitForJob(result.job_id);
-    setText(el.uploadState, "완료");
+    const job = await waitForJob(result.job_id);
+    setText(el.uploadState, job?.status === "canceled" ? "중지됨" : "완료");
     await refreshAll();
-  } catch {
+  } catch (error) {
     setText(el.uploadState, "실패");
+    el.progressText.textContent = error.message || "처리 실패";
   } finally {
     el.uploadButton.disabled = false;
   }
 }
 
 async function waitForJob(jobId) {
-  for (let index = 0; index < 20; index += 1) {
+  while (state.activeJobId === jobId) {
     const job = await api(`/api/jobs/${jobId}`);
+    renderJobProgress(job);
     if (job.status === "completed") return job;
+    if (job.status === "canceled") return job;
     if (job.status === "failed") throw new Error(job.error_message || "job failed");
-    await delay(700);
+    await refreshAll();
+    await delay(1200);
   }
   return null;
+}
+
+async function cancelActiveJob() {
+  if (!state.activeJobId) return;
+
+  el.cancelJobButton.disabled = true;
+  setText(el.uploadState, "중지 요청됨");
+  el.progressText.textContent = "중지 요청됨 · 현재 처리 단위가 끝나면 멈춥니다";
+
+  try {
+    const job = await api(`/api/jobs/${state.activeJobId}/cancel`, { method: "POST" });
+    renderJobProgress(job);
+  } catch (error) {
+    el.cancelJobButton.disabled = false;
+    el.progressText.textContent = error.message || "중지 요청 실패";
+  }
+}
+
+function renderJobProgress(job) {
+  const metadata = job.extra_metadata || {};
+  const progress = calculateProgress(job.status, metadata);
+  el.jobProgress.hidden = false;
+  el.progressFill.style.width = `${Math.round(progress * 100)}%`;
+  el.progressText.textContent = formatJobProgress(job.status, metadata, progress);
+  el.cancelJobButton.hidden = ["completed", "failed", "canceled"].includes(job.status);
+  el.cancelJobButton.disabled = Boolean(metadata.cancel_requested);
+  renderJobSteps(job.status);
+}
+
+function calculateProgress(status, metadata) {
+  if (status === "completed") return 1;
+  if (status === "canceled") return ratio(metadata.processed_pages, metadata.total_pages);
+  if (status === "failed") return 0;
+
+  const stepIndex = Math.max(
+    JOB_STEPS.findIndex((step) => step.status === status),
+    0,
+  );
+  const base = stepIndex / (JOB_STEPS.length - 1);
+  const stepWeight = 1 / (JOB_STEPS.length - 1);
+  const withinStep = calculateStepProgress(status, metadata);
+  return Math.min(base + withinStep * stepWeight, 0.98);
+}
+
+function calculateStepProgress(status, metadata) {
+  if (status === "extracting_pdf" || status === "chunking") {
+    return ratio(metadata.processed_pages, metadata.total_pages);
+  }
+  if (status === "embedding" || status === "extracting_knowledge") {
+    return ratio(metadata.processed_chunks, metadata.total_chunks);
+  }
+  return 0;
+}
+
+function ratio(value, total) {
+  const numericValue = Number(value || 0);
+  const numericTotal = Number(total || 0);
+  if (!numericTotal) return 0;
+  return Math.max(0, Math.min(numericValue / numericTotal, 1));
+}
+
+function formatJobProgress(status, metadata, progress) {
+  const label = JOB_STEPS.find((step) => step.status === status)?.label || status;
+  const percent = `${Math.round(progress * 100)}%`;
+  const currentPage = metadata.current_page ? `현재 p.${metadata.current_page}` : null;
+  const lastPageSeconds = metadata.last_page_seconds
+    ? `최근 페이지 ${Number(metadata.last_page_seconds).toFixed(2)}초`
+    : null;
+  const pageText = metadata.total_pages
+    ? `페이지 ${metadata.processed_pages || 0}/${metadata.total_pages}`
+    : "페이지 확인 중";
+  const chunkText = metadata.total_chunks
+    ? `청크 ${metadata.processed_chunks || 0}/${metadata.total_chunks}`
+    : "청크 대기";
+  const entityText = `엔티티 mention ${metadata.entity_mentions || 0}`;
+  if (status === "completed") return `완료 · ${pageText} · ${chunkText} · ${entityText}`;
+  if (status === "canceled") return `중지됨 · ${pageText} · ${chunkText}`;
+  if (status === "failed") return "실패";
+  if (metadata.cancel_requested) return `중지 요청됨 · ${pageText} · ${chunkText}`;
+  return [label, percent, currentPage, pageText, chunkText, lastPageSeconds].filter(Boolean).join(" · ");
+}
+
+function renderJobSteps(status) {
+  const activeIndex = JOB_STEPS.findIndex((step) => step.status === status);
+  el.jobSteps.innerHTML = "";
+  JOB_STEPS.forEach((step, index) => {
+    const item = document.createElement("li");
+    const isDone = status === "completed" || (activeIndex > -1 && index < activeIndex);
+    const isActive = index === activeIndex;
+    item.className = `${isDone ? "done" : ""} ${isActive ? "active" : ""}`.trim();
+    item.textContent = step.label;
+    el.jobSteps.append(item);
+  });
 }
 
 async function runSearch() {
@@ -366,6 +481,7 @@ el.pdfInput.addEventListener("change", () => {
   el.fileName.textContent = file ? file.name : "선택된 파일 없음";
 });
 el.uploadButton.addEventListener("click", uploadSelectedFile);
+el.cancelJobButton.addEventListener("click", cancelActiveJob);
 el.refreshButton.addEventListener("click", refreshAll);
 el.searchButton.addEventListener("click", runSearch);
 el.searchInput.addEventListener("keydown", (event) => {
@@ -375,4 +491,3 @@ el.closeDialogButton.addEventListener("click", () => el.pageDialog.close());
 
 checkApi();
 refreshAll();
-

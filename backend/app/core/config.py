@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     llm_model: str | None = None
     embedding_model: str | None = None
     embedding_dimensions: int = 1536
+    ingestion_batch_pages: int = 5
+    ingestion_batch_chunks: int = 50
+    enable_embeddings_on_upload: bool = True
+    pdf_text_extraction_mode: str = "blocks"
 
 
 @lru_cache

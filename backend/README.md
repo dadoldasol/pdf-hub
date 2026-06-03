@@ -38,9 +38,13 @@ If `python` is not available on Windows, use an installed Python launcher or the
 
 ## Run Server
 
+From the `backend` directory:
+
 ```powershell
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
 ```
+
+If the backend was already running, stop it with `Ctrl+C` in that terminal and run the command again.
 
 Useful URLs:
 
@@ -49,11 +53,26 @@ http://127.0.0.1:8000/health
 http://127.0.0.1:8000/docs
 ```
 
+## Run Frontend
+
+From the project root:
+
+```powershell
+node frontend\server.js
+```
+
+Open:
+
+```text
+http://127.0.0.1:5173
+```
+
 ## Main API Flow
 
 ```text
 POST /api/documents/upload
 GET  /api/jobs/{job_id}
+POST /api/jobs/{job_id}/cancel
 GET  /api/documents
 GET  /api/documents/{document_id}
 GET  /api/documents/{document_id}/pages/{page_number}
@@ -77,4 +96,3 @@ GET  /api/graph/entities/{entity_id}
 - Entity extraction is rule/pattern-based.
 - OCR, table extraction, LLM summarization, and advanced relation extraction are deferred.
 - Graph edges are generated dynamically from co-mentions rather than persisted as inferred relations.
-

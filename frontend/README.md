@@ -7,7 +7,7 @@ Dependency-free frontend MVP for the PDF Knowledge Hub.
 From the project root:
 
 ```powershell
-& 'C:\Users\hda82\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe' frontend\server.js
+node frontend\server.js
 ```
 
 Open:
@@ -22,3 +22,4 @@ Backend default:
 http://127.0.0.1:8000
 ```
 
+If the frontend was already running, stop it with `Ctrl+C` in that terminal and run `node frontend\server.js` again.

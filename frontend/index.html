@@ -28,6 +28,14 @@
             <strong id="fileName">선택된 파일 없음</strong>
           </label>
           <button id="uploadButton" class="primary-button" type="button">업로드</button>
+          <div id="jobProgress" class="job-progress" hidden>
+            <div class="progress-track">
+              <div id="progressFill" class="progress-fill"></div>
+            </div>
+            <div id="progressText" class="progress-text">대기</div>
+            <button id="cancelJobButton" class="danger-button" type="button" hidden>작업 중지</button>
+            <ol id="jobSteps" class="job-steps"></ol>
+          </div>
         </section>
 
         <section class="panel">
@@ -98,4 +106,3 @@
     <script src="./app.js"></script>
   </body>
 </html>
-
