@@ -79,3 +79,25 @@ def test_page_extraction_timeout_terminates_worker(monkeypatch, tmp_path: Path) 
         service._extract_page_text_with_timeout(tmp_path / "sample.pdf", 3)
 
     assert FakeProcess.terminated is True
+
+
+def test_iter_pages_yields_timeout_page_record(monkeypatch, tmp_path: Path) -> None:
+    pdf_path = tmp_path / "timeout.pdf"
+    _write_pdf(pdf_path, ["page that will time out"])
+
+    def fake_extract_page_text_with_timeout(self, pdf_path: Path, page_number: int) -> str:  # noqa: ARG001
+        raise PdfPageExtractionTimeout(page_number, 0.01)
+
+    monkeypatch.setattr(
+        PdfProcessingService,
+        "_extract_page_text_with_timeout",
+        fake_extract_page_text_with_timeout,
+    )
+
+    page = next(iter(PdfProcessingService(page_timeout_seconds=0.01).iter_pages(pdf_path)))
+
+    assert page.page_number == 1
+    assert page.text == ""
+    assert page.needs_ocr is True
+    assert page.extraction_status == "timeout"
+    assert "exceeded" in (page.extraction_error or "")

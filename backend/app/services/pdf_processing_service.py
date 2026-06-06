@@ -17,6 +17,8 @@ class ExtractedPage:
     text: str
     needs_ocr: bool
     extraction_seconds: float = 0.0
+    extraction_status: str = "completed"
+    extraction_error: str | None = None
 
 
 @dataclass(frozen=True)
@@ -90,13 +92,32 @@ class PdfProcessingService:
             if before_page is not None:
                 before_page(page_idx)
             started_at = perf_counter()
-            text = self._extract_page_text_with_timeout(pdf_path, page_idx).strip()
-            yield ExtractedPage(
-                page_number=page_idx,
-                text=text,
-                needs_ocr=len(text) < self.min_text_length_for_ocr,
-                extraction_seconds=perf_counter() - started_at,
-            )
+            try:
+                text = self._extract_page_text_with_timeout(pdf_path, page_idx).strip()
+                yield ExtractedPage(
+                    page_number=page_idx,
+                    text=text,
+                    needs_ocr=len(text) < self.min_text_length_for_ocr,
+                    extraction_seconds=perf_counter() - started_at,
+                )
+            except PdfPageExtractionTimeout as exc:
+                yield ExtractedPage(
+                    page_number=page_idx,
+                    text="",
+                    needs_ocr=True,
+                    extraction_seconds=perf_counter() - started_at,
+                    extraction_status="timeout",
+                    extraction_error=str(exc),
+                )
+            except Exception as exc:
+                yield ExtractedPage(
+                    page_number=page_idx,
+                    text="",
+                    needs_ocr=True,
+                    extraction_seconds=perf_counter() - started_at,
+                    extraction_status="failed",
+                    extraction_error=f"{type(exc).__name__}: {exc}",
+                )
 
     def _extract_page_text_with_timeout(self, pdf_path: Path, page_number: int) -> str:
         if self.page_timeout_seconds <= 0:

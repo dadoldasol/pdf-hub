@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import Boolean, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
+from sqlalchemy import Boolean, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -39,5 +39,8 @@ class DocumentPage(UUIDPrimaryKeyMixin, CreatedAtMixin, MetadataMixin, Base):
     page_number: Mapped[int] = mapped_column(Integer)
     text: Mapped[str] = mapped_column(Text)
     needs_ocr: Mapped[bool] = mapped_column(Boolean, default=False)
+    extraction_status: Mapped[str] = mapped_column(String(32), default="completed")
+    extraction_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    extraction_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     document: Mapped[Document] = relationship(back_populates="pages")

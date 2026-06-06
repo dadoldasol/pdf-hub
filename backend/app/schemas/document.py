@@ -44,3 +44,6 @@ class PageDetail(BaseModel):
     page_number: int
     text: str
     needs_ocr: bool
+    extraction_status: str
+    extraction_error: str | None = None
+    extraction_seconds: float | None = None

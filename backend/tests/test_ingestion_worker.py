@@ -74,6 +74,8 @@ def test_ingestion_commits_each_page_before_later_extraction_failure(
                 text="IFE first page text.",
                 needs_ocr=False,
                 extraction_seconds=0.01,
+                extraction_status="completed",
+                extraction_error=None,
             )
             if before_page is not None:
                 before_page(2)

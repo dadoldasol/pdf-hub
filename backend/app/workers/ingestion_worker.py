@@ -159,6 +159,9 @@ def _extract_pages_and_chunks(
             page_number=page.page_number,
             text=page.text,
             needs_ocr=page.needs_ocr,
+            extraction_status=page.extraction_status,
+            extraction_error=page.extraction_error,
+            extraction_seconds=page.extraction_seconds,
             extra_metadata={},
         )
         db.add(page_row)
