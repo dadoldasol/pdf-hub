@@ -4,6 +4,7 @@ from sqlalchemy import delete
 
 from app.models.chunk import DocumentChunk
 from app.models.document import DocumentPage
+from app.models.entity import EntityMention
 from app.models.job import ProcessingJob
 from app.workers import ingestion_worker
 from app.workers.ingestion_worker import run_ingestion_job
@@ -66,7 +67,7 @@ def test_ingestion_commits_each_page_before_later_extraction_failure(
         def get_page_count(self, pdf_path):  # noqa: ANN001
             return 2
 
-        def iter_pages(self, pdf_path, before_page=None):  # noqa: ANN001
+        def iter_pages(self, pdf_path, before_page=None, skip_pages=None):  # noqa: ANN001, ARG002
             if before_page is not None:
                 before_page(1)
             yield SimpleNamespace(
@@ -107,6 +108,7 @@ def test_ingestion_commits_each_page_before_later_extraction_failure(
         assert [page.page_number for page in pages] == [1]
         assert [chunk.page_number for chunk in chunks] == [1]
     finally:
+        db_session.execute(delete(EntityMention).where(EntityMention.document_id == document.id))
         db_session.execute(delete(DocumentChunk).where(DocumentChunk.document_id == document.id))
         db_session.execute(delete(DocumentPage).where(DocumentPage.document_id == document.id))
         db_session.execute(delete(ProcessingJob).where(ProcessingJob.id == job.id))
@@ -123,7 +125,7 @@ def test_ingestion_marks_document_partially_processed_for_failed_pages(
         def get_page_count(self, pdf_path):  # noqa: ANN001
             return 2
 
-        def iter_pages(self, pdf_path, before_page=None):  # noqa: ANN001
+        def iter_pages(self, pdf_path, before_page=None, skip_pages=None):  # noqa: ANN001, ARG002
             for page_number, status in [(1, "completed"), (2, "timeout")]:
                 if before_page is not None:
                     before_page(page_number)
@@ -163,6 +165,87 @@ def test_ingestion_marks_document_partially_processed_for_failed_pages(
         assert job.extra_metadata["timeout_pages"] == 1
         assert [page.extraction_status for page in pages] == ["completed", "timeout"]
     finally:
+        db_session.execute(delete(EntityMention).where(EntityMention.document_id == document.id))
+        db_session.execute(delete(DocumentChunk).where(DocumentChunk.document_id == document.id))
+        db_session.execute(delete(DocumentPage).where(DocumentPage.document_id == document.id))
+        db_session.execute(delete(ProcessingJob).where(ProcessingJob.id == job.id))
+        db_session.delete(document)
+        db_session.commit()
+
+
+def test_ingestion_resume_keeps_completed_pages_and_processes_remaining(
+    db_session,
+    document,
+    monkeypatch,
+) -> None:
+    class FakePdfProcessingService:
+        seen_skip_pages: set[int] = set()
+
+        def get_page_count(self, pdf_path):  # noqa: ANN001
+            return 2
+
+        def iter_pages(self, pdf_path, before_page=None, skip_pages=None):  # noqa: ANN001
+            FakePdfProcessingService.seen_skip_pages = set(skip_pages or set())
+            if before_page is not None:
+                before_page(2)
+            yield SimpleNamespace(
+                page_number=2,
+                text="CSID second page text.",
+                needs_ocr=False,
+                extraction_seconds=0.01,
+                extraction_status="completed",
+                extraction_error=None,
+            )
+
+        def chunk_text(self, text):  # noqa: ANN001
+            return [text] if text else []
+
+    document.storage_path = "fake.pdf"
+    document.status = "processing"
+    existing_page = DocumentPage(
+        document_id=document.id,
+        page_number=1,
+        text="IFE first page text.",
+        needs_ocr=False,
+        extraction_status="completed",
+        extra_metadata={},
+    )
+    existing_chunk = DocumentChunk(
+        document_id=document.id,
+        page_id=existing_page.id,
+        chunk_index=0,
+        page_number=1,
+        text="IFE first page text.",
+        extra_metadata={},
+    )
+    job = ProcessingJob(document_id=document.id, status="queued", extra_metadata={})
+    db_session.add_all([existing_page, existing_chunk, job])
+    db_session.commit()
+    monkeypatch.setattr(ingestion_worker, "PdfProcessingService", FakePdfProcessingService)
+
+    try:
+        run_ingestion_job(job.id)
+
+        db_session.refresh(document)
+        db_session.refresh(job)
+        pages = list(
+            db_session.query(DocumentPage)
+            .filter(DocumentPage.document_id == document.id)
+            .order_by(DocumentPage.page_number)
+        )
+        chunks = list(
+            db_session.query(DocumentChunk)
+            .filter(DocumentChunk.document_id == document.id)
+            .order_by(DocumentChunk.chunk_index)
+        )
+
+        assert FakePdfProcessingService.seen_skip_pages == {1}
+        assert document.status == "processed"
+        assert job.status == "completed"
+        assert [page.page_number for page in pages] == [1, 2]
+        assert [chunk.page_number for chunk in chunks] == [1, 2]
+    finally:
+        db_session.execute(delete(EntityMention).where(EntityMention.document_id == document.id))
         db_session.execute(delete(DocumentChunk).where(DocumentChunk.document_id == document.id))
         db_session.execute(delete(DocumentPage).where(DocumentPage.document_id == document.id))
         db_session.execute(delete(ProcessingJob).where(ProcessingJob.id == job.id))

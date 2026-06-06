@@ -84,11 +84,19 @@ class PdfProcessingService:
         with fitz.open(pdf_path) as document:
             return document.page_count
 
-    def iter_pages(self, pdf_path: Path, before_page: Callable[[int], None] | None = None) -> Iterator[ExtractedPage]:
+    def iter_pages(
+        self,
+        pdf_path: Path,
+        before_page: Callable[[int], None] | None = None,
+        skip_pages: set[int] | None = None,
+    ) -> Iterator[ExtractedPage]:
         with fitz.open(pdf_path) as document:
             page_count = document.page_count
 
+        skipped_pages = skip_pages or set()
         for page_idx in range(1, page_count + 1):
+            if page_idx in skipped_pages:
+                continue
             if before_page is not None:
                 before_page(page_idx)
             started_at = perf_counter()

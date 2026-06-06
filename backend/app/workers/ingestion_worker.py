@@ -5,7 +5,7 @@ from pathlib import Path
 from time import perf_counter
 from uuid import UUID
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -13,7 +13,7 @@ from app.db.session import SessionLocal
 from app.models.chunk import DocumentChunk
 from app.models.document import Document, DocumentPage
 from app.models.entity import Entity, EntityMention
-from app.models.graph import KnowledgeNode
+from app.models.graph import KnowledgeEdge, KnowledgeNode
 from app.models.job import ProcessingJob
 from app.services.embedding_service import EmbeddingService
 from app.services.entity_extraction_service import EntityCandidate, EntityExtractionService
@@ -62,9 +62,6 @@ def run_ingestion_job(job_id: UUID) -> None:
         pdf_path = Path(document.storage_path)
         page_count = pdf_service.get_page_count(pdf_path)
 
-        db.execute(delete(EntityMention).where(EntityMention.document_id == document.id))
-        db.execute(delete(DocumentChunk).where(DocumentChunk.document_id == document.id))
-        db.execute(delete(DocumentPage).where(DocumentPage.document_id == document.id))
         document.page_count = page_count
         _set_job_progress(job, "extracting_pdf", total_pages=page_count)
         db.commit()
@@ -149,6 +146,23 @@ def _extract_pages_and_chunks(
     chunk_index = 0
     failed_pages = 0
     timeout_pages = 0
+    completed_page_numbers = set(
+        db.scalars(
+            select(DocumentPage.page_number).where(
+                DocumentPage.document_id == document.id,
+                DocumentPage.extraction_status == "completed",
+            )
+        )
+    )
+    if completed_page_numbers:
+        chunk_index = (
+            db.scalar(
+                select(func.coalesce(func.max(DocumentChunk.chunk_index), -1)).where(
+                    DocumentChunk.document_id == document.id
+                )
+            )
+            + 1
+        )
 
     def mark_page_started(page_number: int) -> None:
         _set_job_progress(
@@ -159,7 +173,11 @@ def _extract_pages_and_chunks(
         )
         db.commit()
 
-    for page in pdf_service.iter_pages(pdf_path, before_page=mark_page_started):
+    for page in pdf_service.iter_pages(
+        pdf_path,
+        before_page=mark_page_started,
+        skip_pages=completed_page_numbers,
+    ):
         _raise_if_canceled(db, job)
         _set_job_progress(
             job,
@@ -168,6 +186,7 @@ def _extract_pages_and_chunks(
             current_page_status="saving_text",
             last_page_seconds=round(page.extraction_seconds, 3),
         )
+        _delete_page_artifacts(db, document.id, page.page_number)
         page_row = DocumentPage(
             document_id=document.id,
             page_number=page.page_number,
@@ -274,6 +293,10 @@ def _extract_entities(db: Session, job: ProcessingJob, document_id: UUID, chunk_
 
     extraction_service = EntityExtractionService()
     validation_service = EntityValidationService()
+    db.execute(delete(EntityMention).where(EntityMention.document_id == document_id))
+    db.commit()
+    _raise_if_canceled(db, job)
+
     processed_chunks = 0
     entity_mentions = 0
     entity_candidates = 0
@@ -325,6 +348,28 @@ def _extract_entities(db: Session, job: ProcessingJob, document_id: UUID, chunk_
         _raise_if_canceled(db, job)
 
     return entity_mentions
+
+
+def _delete_page_artifacts(db: Session, document_id: UUID, page_number: int) -> None:
+    chunk_ids = set(
+        db.scalars(
+            select(DocumentChunk.id).where(
+                DocumentChunk.document_id == document_id,
+                DocumentChunk.page_number == page_number,
+            )
+        )
+    )
+    if chunk_ids:
+        db.execute(delete(KnowledgeEdge).where(KnowledgeEdge.source_chunk_id.in_(chunk_ids)))
+        db.execute(delete(EntityMention).where(EntityMention.chunk_id.in_(chunk_ids)))
+        db.execute(delete(DocumentChunk).where(DocumentChunk.id.in_(chunk_ids)))
+
+    db.execute(
+        delete(DocumentPage).where(
+            DocumentPage.document_id == document_id,
+            DocumentPage.page_number == page_number,
+        )
+    )
 
 
 def _set_job_progress(job: ProcessingJob, status: str, **metadata_updates: object) -> None:

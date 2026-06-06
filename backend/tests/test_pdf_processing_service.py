@@ -101,3 +101,13 @@ def test_iter_pages_yields_timeout_page_record(monkeypatch, tmp_path: Path) -> N
     assert page.needs_ocr is True
     assert page.extraction_status == "timeout"
     assert "exceeded" in (page.extraction_error or "")
+
+
+def test_iter_pages_skips_requested_pages(tmp_path: Path) -> None:
+    pdf_path = tmp_path / "skip.pdf"
+    _write_pdf(pdf_path, ["first", "second", "third"])
+
+    pages = list(PdfProcessingService(page_timeout_seconds=0).iter_pages(pdf_path, skip_pages={1, 3}))
+
+    assert [page.page_number for page in pages] == [2]
+    assert pages[0].text == "second"
