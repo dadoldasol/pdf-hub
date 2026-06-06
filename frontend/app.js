@@ -45,6 +45,7 @@ const JOB_STEPS = [
   { status: "embedding", label: "임베딩 생성" },
   { status: "extracting_knowledge", label: "엔티티 추출" },
   { status: "completed", label: "완료" },
+  { status: "partially_processed", label: "부분 완료" },
   { status: "canceled", label: "중지됨" },
 ];
 
@@ -178,9 +179,9 @@ async function uploadSelectedFile() {
 
     state.activeJobId = result.job_id;
     renderJobProgress({ status: result.status, extra_metadata: {} });
-    setText(el.uploadState, "처리 중");
+    setText(el.uploadState, "대기 중");
     const job = await waitForJob(result.job_id);
-    setText(el.uploadState, job?.status === "canceled" ? "중지됨" : "완료");
+    setText(el.uploadState, formatTerminalJobState(job?.status));
     await refreshAll();
   } catch (error) {
     setText(el.uploadState, "실패");
@@ -195,6 +196,7 @@ async function waitForJob(jobId) {
     const job = await api(`/api/jobs/${jobId}`);
     renderJobProgress(job);
     if (job.status === "completed") return job;
+    if (job.status === "partially_processed") return job;
     if (job.status === "canceled") return job;
     if (job.status === "failed") throw new Error(job.error_message || "job failed");
     await refreshAll();
@@ -241,13 +243,14 @@ function renderJobProgress(job) {
   el.jobProgress.hidden = false;
   el.progressFill.style.width = `${Math.round(progress * 100)}%`;
   el.progressText.textContent = formatJobProgress(job.status, metadata, progress);
-  el.cancelJobButton.hidden = ["completed", "failed", "canceled"].includes(job.status);
+  el.cancelJobButton.hidden = ["completed", "partially_processed", "failed", "canceled"].includes(job.status);
   el.cancelJobButton.disabled = Boolean(metadata.cancel_requested);
   renderJobSteps(job.status);
 }
 
 function calculateProgress(status, metadata) {
   if (status === "completed") return 1;
+  if (status === "partially_processed") return 1;
   if (status === "canceled") return ratio(metadata.processed_pages, metadata.total_pages);
   if (status === "failed") return 0;
 
@@ -292,11 +295,25 @@ function formatJobProgress(status, metadata, progress) {
     ? `청크 ${metadata.processed_chunks || 0}/${metadata.total_chunks}`
     : "청크 대기";
   const entityText = `엔티티 mention ${metadata.entity_mentions || 0}`;
+  const failedText = formatFailedPages(metadata);
   if (status === "completed") return `완료 · ${pageText} · ${chunkText} · ${entityText}`;
+  if (status === "partially_processed") {
+    return ["부분 완료", pageText, chunkText, failedText, entityText].filter(Boolean).join(" · ");
+  }
   if (status === "canceled") return `중지됨 · ${pageText} · ${chunkText}`;
   if (status === "failed") return "실패";
   if (metadata.cancel_requested) return `중지 요청됨 · ${pageText} · ${chunkText}`;
-  return [label, percent, currentPage, pageText, chunkText, lastPageSeconds].filter(Boolean).join(" · ");
+  return [label, percent, currentPage, pageText, chunkText, failedText, lastPageSeconds]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function formatFailedPages(metadata) {
+  const failedPages = Number(metadata.failed_pages || 0);
+  const timeoutPages = Number(metadata.timeout_pages || 0);
+  if (!failedPages) return null;
+  if (timeoutPages) return `실패 페이지 ${failedPages} · timeout ${timeoutPages}`;
+  return `실패 페이지 ${failedPages}`;
 }
 
 function renderJobSteps(status) {
@@ -304,12 +321,22 @@ function renderJobSteps(status) {
   el.jobSteps.innerHTML = "";
   JOB_STEPS.forEach((step, index) => {
     const item = document.createElement("li");
-    const isDone = status === "completed" || (activeIndex > -1 && index < activeIndex);
+    const isDone =
+      status === "completed" ||
+      status === "partially_processed" ||
+      (activeIndex > -1 && index < activeIndex);
     const isActive = index === activeIndex;
     item.className = `${isDone ? "done" : ""} ${isActive ? "active" : ""}`.trim();
     item.textContent = step.label;
     el.jobSteps.append(item);
   });
+}
+
+function formatTerminalJobState(status) {
+  if (status === "canceled") return "중지됨";
+  if (status === "partially_processed") return "부분 완료";
+  if (status === "failed") return "실패";
+  return "완료";
 }
 
 async function runSearch() {
