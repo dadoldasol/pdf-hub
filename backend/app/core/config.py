@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     embedding_dimensions: int = 1536
     ingestion_batch_pages: int = 5
     ingestion_batch_chunks: int = 50
+    ingestion_worker_poll_interval_seconds: float = 2.0
+    ingestion_worker_max_jobs: int = 1
     enable_embeddings_on_upload: bool = True
     pdf_text_extraction_mode: str = "blocks"
     llm_provider: str = "openai"

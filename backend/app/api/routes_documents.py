@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -12,14 +12,12 @@ from app.schemas.document import (
     PageDetail,
 )
 from app.services.document_service import DocumentService
-from app.workers.ingestion_worker import run_ingestion_job
 
 router = APIRouter()
 
 
 @router.post("/upload", response_model=DocumentUploadResponse, status_code=status.HTTP_201_CREATED)
 async def upload_document(
-    background_tasks: BackgroundTasks,
     response: Response,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
@@ -42,7 +40,6 @@ async def upload_document(
     if job is None:
         raise HTTPException(status_code=500, detail="Processing job was not created.")
 
-    background_tasks.add_task(run_ingestion_job, job.id)
     return DocumentUploadResponse(document_id=document.id, job_id=job.id, status=job.status)
 
 

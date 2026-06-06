@@ -122,6 +122,18 @@ backend 디렉토리에서 실행한다.
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
 ```
 
+PDF 업로드는 처리 job을 `queued` 상태로 만든 뒤 바로 반환한다. 실제 PDF 추출/청크/임베딩 처리는 별도 터미널에서 ingestion worker를 실행해야 진행된다.
+
+```powershell
+.\.venv\Scripts\python.exe -m app.workers.worker_main
+```
+
+로컬에서 대기 중인 job 하나만 처리하고 종료하려면 다음을 사용한다.
+
+```powershell
+.\.venv\Scripts\python.exe -m app.workers.worker_main --once
+```
+
 확인:
 
 ```text

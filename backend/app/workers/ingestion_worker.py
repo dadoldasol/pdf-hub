@@ -110,7 +110,9 @@ def _start_job(job: ProcessingJob) -> None:
     job.error_message = None
     job.started_at = datetime.now(UTC)
     job.finished_at = None
-    job.extra_metadata = {
+    metadata = dict(job.extra_metadata or {})
+    metadata.update(
+        {
         "stage": "extracting_pdf",
         "total_pages": None,
         "processed_pages": 0,
@@ -120,7 +122,9 @@ def _start_job(job: ProcessingJob) -> None:
         "entity_candidates": 0,
         "entities_accepted": 0,
         "entities_rejected": 0,
-    }
+        }
+    )
+    job.extra_metadata = metadata
 
 
 def _extract_pages_and_chunks(

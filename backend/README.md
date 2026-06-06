@@ -48,6 +48,18 @@ From the `backend` directory:
 
 If the backend was already running, stop it with `Ctrl+C` in that terminal and run the command again.
 
+Uploads create queued processing jobs. Run the ingestion worker in a second terminal to process them:
+
+```powershell
+.\.venv\Scripts\python.exe -m app.workers.worker_main
+```
+
+For a one-shot local check, process at most one queued job and exit:
+
+```powershell
+.\.venv\Scripts\python.exe -m app.workers.worker_main --once
+```
+
 Useful URLs:
 
 ```text
