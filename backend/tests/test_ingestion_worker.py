@@ -112,3 +112,59 @@ def test_ingestion_commits_each_page_before_later_extraction_failure(
         db_session.execute(delete(ProcessingJob).where(ProcessingJob.id == job.id))
         db_session.delete(document)
         db_session.commit()
+
+
+def test_ingestion_marks_document_partially_processed_for_failed_pages(
+    db_session,
+    document,
+    monkeypatch,
+) -> None:
+    class FakePdfProcessingService:
+        def get_page_count(self, pdf_path):  # noqa: ANN001
+            return 2
+
+        def iter_pages(self, pdf_path, before_page=None):  # noqa: ANN001
+            for page_number, status in [(1, "completed"), (2, "timeout")]:
+                if before_page is not None:
+                    before_page(page_number)
+                yield SimpleNamespace(
+                    page_number=page_number,
+                    text="IFE first page text." if status == "completed" else "",
+                    needs_ocr=status != "completed",
+                    extraction_seconds=0.01,
+                    extraction_status=status,
+                    extraction_error=None if status == "completed" else "timeout",
+                )
+
+        def chunk_text(self, text):  # noqa: ANN001
+            return [text] if text else []
+
+    document.storage_path = "fake.pdf"
+    document.status = "uploaded"
+    job = ProcessingJob(document_id=document.id, status="queued", extra_metadata={})
+    db_session.add(job)
+    db_session.commit()
+    monkeypatch.setattr(ingestion_worker, "PdfProcessingService", FakePdfProcessingService)
+
+    try:
+        run_ingestion_job(job.id)
+
+        db_session.refresh(document)
+        db_session.refresh(job)
+        pages = list(
+            db_session.query(DocumentPage)
+            .filter(DocumentPage.document_id == document.id)
+            .order_by(DocumentPage.page_number)
+        )
+
+        assert document.status == "partially_processed"
+        assert job.status == "partially_processed"
+        assert job.extra_metadata["failed_pages"] == 1
+        assert job.extra_metadata["timeout_pages"] == 1
+        assert [page.extraction_status for page in pages] == ["completed", "timeout"]
+    finally:
+        db_session.execute(delete(DocumentChunk).where(DocumentChunk.document_id == document.id))
+        db_session.execute(delete(DocumentPage).where(DocumentPage.document_id == document.id))
+        db_session.execute(delete(ProcessingJob).where(ProcessingJob.id == job.id))
+        db_session.delete(document)
+        db_session.commit()

@@ -1,4 +1,5 @@
 from collections.abc import Iterator
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from time import perf_counter
@@ -22,6 +23,13 @@ from app.services.pdf_processing_service import PdfProcessingService
 
 class JobCanceled(Exception):
     """Raised when a user requests cancellation for an ingestion job."""
+
+
+@dataclass(frozen=True)
+class PageChunkExtractionResult:
+    chunk_count: int
+    failed_pages: int = 0
+    timeout_pages: int = 0
 
 
 def run_ingestion_job(job_id: UUID) -> None:
@@ -62,21 +70,25 @@ def run_ingestion_job(job_id: UUID) -> None:
         db.commit()
         _raise_if_canceled(db, job)
 
-        chunk_count = _extract_pages_and_chunks(db, job, document, pdf_service, pdf_path)
+        extraction_result = _extract_pages_and_chunks(db, job, document, pdf_service, pdf_path)
+        chunk_count = extraction_result.chunk_count
         _embed_chunks(db, job, document.id, chunk_count)
         entity_mentions = _extract_entities(db, job, document.id, chunk_count)
 
+        final_status = "partially_processed" if extraction_result.failed_pages else "completed"
         _set_job_progress(
             job,
-            "completed",
-            stage="completed",
+            final_status,
+            stage=final_status,
             processed_pages=page_count,
             processed_chunks=chunk_count,
             total_chunks=chunk_count,
+            failed_pages=extraction_result.failed_pages,
+            timeout_pages=extraction_result.timeout_pages,
             entity_mentions=entity_mentions,
         )
         job.finished_at = datetime.now(UTC)
-        document.status = "processed"
+        document.status = final_status if final_status == "partially_processed" else "processed"
         db.commit()
     except JobCanceled:
         db.rollback()
@@ -133,8 +145,10 @@ def _extract_pages_and_chunks(
     document: Document,
     pdf_service: PdfProcessingService,
     pdf_path: Path,
-) -> int:
+) -> PageChunkExtractionResult:
     chunk_index = 0
+    failed_pages = 0
+    timeout_pages = 0
 
     def mark_page_started(page_number: int) -> None:
         _set_job_progress(
@@ -167,6 +181,11 @@ def _extract_pages_and_chunks(
         db.add(page_row)
         db.flush()
 
+        if page.extraction_status != "completed":
+            failed_pages += 1
+            if page.extraction_status == "timeout":
+                timeout_pages += 1
+
         _set_job_progress(job, "chunking", stage="chunking", current_page=page.page_number)
         chunk_started_at = perf_counter()
         for chunk_text in pdf_service.chunk_text(page.text):
@@ -187,8 +206,10 @@ def _extract_pages_and_chunks(
             job,
             "chunking",
             processed_pages=page.page_number,
+            failed_pages=failed_pages,
+            timeout_pages=timeout_pages,
             total_chunks=chunk_index,
-            current_page_status="chunked",
+            current_page_status=page.extraction_status,
             last_chunk_seconds=round(perf_counter() - chunk_started_at, 3),
         )
         db.commit()
@@ -196,7 +217,11 @@ def _extract_pages_and_chunks(
 
     db.commit()
     _raise_if_canceled(db, job)
-    return chunk_index
+    return PageChunkExtractionResult(
+        chunk_count=chunk_index,
+        failed_pages=failed_pages,
+        timeout_pages=timeout_pages,
+    )
 
 
 def _embed_chunks(db: Session, job: ProcessingJob, document_id: UUID, chunk_count: int) -> None:
