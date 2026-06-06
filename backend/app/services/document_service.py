@@ -97,6 +97,7 @@ class DocumentService:
         self.db.flush()
 
         self._delete_orphan_entities(entity_ids)
+        self._delete_all_orphan_entities()
         self._delete_orphan_nodes(node_ids)
         self.db.commit()
         self.storage.delete_file(Path(document.storage_path))
@@ -122,6 +123,17 @@ class DocumentService:
                 self.db.execute(delete(KnowledgeNode).where(KnowledgeNode.id.in_(node_ids)))
 
             self.db.execute(delete(Entity).where(Entity.id == entity_id))
+
+    def _delete_all_orphan_entities(self) -> None:
+        orphan_entity_ids = set(
+            self.db.scalars(
+                select(Entity.id)
+                .outerjoin(EntityMention, EntityMention.entity_id == Entity.id)
+                .group_by(Entity.id)
+                .having(func.count(EntityMention.id) == 0)
+            )
+        )
+        self._delete_orphan_entities(orphan_entity_ids)
 
     def _delete_orphan_nodes(self, node_ids: set[UUID]) -> None:
         for node_id in node_ids:

@@ -124,3 +124,36 @@ def test_delete_document_removes_document_scoped_rows_and_file(db_session, docum
     assert db_session.get(KnowledgeNode, node_id) is None
     assert db_session.get(ProcessingJob, job_id) is None
     assert not pdf_path.exists()
+
+
+def test_delete_document_removes_preexisting_orphan_entities(db_session, document, tmp_path: Path) -> None:
+    pdf_path = tmp_path / "delete-orphan.pdf"
+    pdf_path.write_bytes(b"%PDF delete orphan")
+    document.storage_path = str(pdf_path)
+    document.file_hash = uuid.uuid4().hex + uuid.uuid4().hex
+    orphan = Entity(
+        entity_type="ISP_BLOCK",
+        name="IFE",
+        normalized_name="IFE",
+        confidence=0.95,
+        extra_metadata={},
+    )
+    db_session.add(orphan)
+    db_session.flush()
+    orphan_node = KnowledgeNode(
+        entity_id=orphan.id,
+        node_type=orphan.entity_type,
+        name=orphan.name,
+        normalized_name=orphan.normalized_name,
+        extra_metadata={},
+    )
+    db_session.add(orphan_node)
+    db_session.commit()
+    orphan_id = orphan.id
+    orphan_node_id = orphan_node.id
+    service = _document_service(db_session, tmp_path)
+
+    assert service.delete_document(document.id) is True
+
+    assert db_session.get(Entity, orphan_id) is None
+    assert db_session.get(KnowledgeNode, orphan_node_id) is None

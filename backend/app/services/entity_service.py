@@ -16,14 +16,20 @@ class EntityService:
         mention_count = func.count(EntityMention.id).label("mention_count")
         stmt = (
             select(Entity)
-            .outerjoin(EntityMention, EntityMention.entity_id == Entity.id)
+            .join(EntityMention, EntityMention.entity_id == Entity.id)
             .group_by(Entity.id)
             .order_by(desc(Entity.confidence).nullslast(), desc(mention_count), Entity.normalized_name.asc())
         )
         return list(self.db.scalars(stmt))
 
     def get_entity(self, entity_id: UUID) -> Entity | None:
-        return self.db.get(Entity, entity_id)
+        stmt = (
+            select(Entity)
+            .join(EntityMention, EntityMention.entity_id == Entity.id)
+            .where(Entity.id == entity_id)
+            .group_by(Entity.id)
+        )
+        return self.db.scalar(stmt)
 
     def get_knowledge_card(self, entity_id: UUID) -> KnowledgeCard | None:
         entity = self.get_entity(entity_id)
