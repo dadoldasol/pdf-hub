@@ -21,12 +21,12 @@ Backend API
   - 그래프 API
   - 작업 상태 API
 
-Background Worker
+Ingestion Worker
   - PDF 추출
   - 청크 생성
-  - LLM 추출
   - 임베딩 생성
-  - 관계 생성
+  - rule 기반 엔티티 추출
+  - 실패 페이지 기록
 
 Storage
   PostgreSQL + pgvector
@@ -49,14 +49,15 @@ File Storage
 1. 사용자가 PDF 업로드
 2. Backend가 원본 파일 저장
 3. document 레코드 생성
-4. background job 생성
-5. worker가 PDF 페이지별 텍스트 추출
-6. 페이지 텍스트 저장
-7. 청크 분할
-8. 청크별 임베딩 생성
-9. LLM으로 요약/엔티티/관계 추출
-10. 검색 인덱스 및 관계 테이블 저장
-11. Frontend에서 검색/지식 카드/그래프 조회
+4. queued processing job 생성
+5. 별도 ingestion worker가 job claim
+6. worker가 PDF 페이지별 텍스트를 child process timeout 경계 안에서 추출
+7. 페이지 텍스트와 실패 상태를 page 단위로 저장
+8. 청크 분할
+9. 청크별 임베딩 생성
+10. rule/pattern entity 추출
+11. 검색 인덱스 및 관계 테이블 저장
+12. Frontend에서 검색/지식 카드/그래프 조회
 ```
 
 ## 3. 주요 컴포넌트
@@ -90,11 +91,13 @@ Neo4j는 다음 시점에 검토한다.
 
 PDF 처리와 LLM 호출은 요청 시간 안에 끝내지 않는다.
 
-MVP 기본값:
+현재 기본값:
 
 - API 요청에서 업로드만 처리
-- 처리 작업은 background job으로 실행
-- 초기에는 FastAPI `BackgroundTasks` 또는 단일 worker 프로세스 사용
+- 처리 작업은 별도 worker 프로세스에서 실행
+- worker는 PostgreSQL의 `queued` job을 polling/claim한다.
+- 페이지 추출은 child process로 격리하고 timeout/cancel 시 terminate한다.
+- 일부 페이지 실패 시 문서는 `partially_processed`가 될 수 있다.
 - 작업 상태는 DB에 저장
 
 확장 시:
@@ -116,4 +119,3 @@ MVP 기본값:
 - `text_span` 또는 `bbox`
 
 MVP에서는 page number와 chunk id를 우선 보존한다. bbox 기반 위치 추적은 후순위로 둔다.
-

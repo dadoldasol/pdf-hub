@@ -68,22 +68,26 @@ app/
 
 ### 비동기 작업 처리
 
-MVP:
+현재 기본값:
 
 - FastAPI upload endpoint는 파일 저장과 job 생성까지만 수행한다.
-- worker 함수가 PDF 처리, LLM 처리, embedding 생성을 순차 실행한다.
+- 별도 ingestion worker 프로세스가 `queued` job을 claim해서 PDF 처리, embedding, rule 기반 entity 추출을 순차 실행한다.
+- LLM entity validation은 ingestion 안정성을 위해 별도 스위치(`ENABLE_LLM_ENTITY_VALIDATION_ON_INGESTION`)가 켜진 경우에만 upload ingestion 중 실행한다.
 - 작업 상태는 `processing_jobs`에 저장한다.
 
 상태값:
 
 ```text
 queued
+claimed
 extracting_pdf
 chunking
 embedding
 extracting_knowledge
 completed
+partially_processed
 failed
+canceled
 ```
 
 ## 2. PDF Processing
@@ -110,11 +114,12 @@ failed
 1. PDF 열기
 2. 페이지 수 확인
 3. 페이지별 text 추출
-4. text 길이가 너무 짧으면 image-based page 후보로 표시
-5. pdfplumber로 table 후보 추출
-6. page record 저장
-7. chunk 생성
-8. chunk에 document_id/page_number/source_text 저장
+4. 페이지별 child process timeout으로 추출을 격리
+5. blocks mode 실패 시 text mode fallback 재시도
+6. text 길이가 너무 짧거나 추출 실패 시 OCR 후보로 표시
+7. page record를 page 단위로 저장/commit
+8. chunk 생성
+9. chunk에 document_id/page_number/source_text 저장
 ```
 
 ### OCR fallback

@@ -51,17 +51,45 @@ documents
 - 삭제 후 mention이 0개인 entity만 orphan cleanup 대상으로 본다.
 - knowledge node도 연결된 entity가 삭제되거나 edge가 없으면 cleanup할 수 있다.
 
+## Page Extraction Fields
+
+`document_pages`는 페이지별 추출 결과와 실패 정보를 저장한다.
+
+```text
+document_pages
+- id
+- document_id
+- page_number
+- text
+- needs_ocr
+- extraction_status
+- extraction_error
+- extraction_seconds
+- extra_metadata
+- created_at
+```
+
+`extraction_status` 값:
+
+- `completed`: 텍스트 추출 성공
+- `timeout`: 페이지별 timeout 초과
+- `failed`: 추출 중 예외 발생
+
+timeout/failed 페이지도 row를 남긴다. 이 경우 `text`는 빈 문자열일 수 있고, `needs_ocr=true`로 후속 재처리 후보임을 표시한다.
+
 ## Reprocess Policy
 
-Future work.
+현재 worker는 기존 성공 페이지를 먼저 삭제하지 않는다. 같은 job을 재실행하면 `extraction_status=completed`인 페이지는 건너뛰고, 실패/미처리 페이지만 이어서 처리한다.
 
-Reprocess는 document row와 original PDF file은 유지하고, 다음 데이터를 재생성한다.
+향후 명시적 reprocess API는 document row와 original PDF file은 유지하고, 다음 데이터를 재생성한다.
 
 - `document_pages`
 - `document_chunks`
 - `entity_mentions`
 - document-scoped `knowledge_edges`
 - job row
+
+명시적 reprocess를 구현할 때도 기존 성공 데이터를 먼저 전체 삭제하지 않고, 새 run 결과가 저장된 뒤 성공 범위를 교체하는 방식을 우선 검토한다.
 
 ## Migration Notes
 

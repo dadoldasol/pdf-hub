@@ -134,6 +134,17 @@ PDF 업로드는 처리 job을 `queued` 상태로 만든 뒤 바로 반환한다
 .\.venv\Scripts\python.exe -m app.workers.worker_main --once
 ```
 
+큰 PDF 안정성 관련 주요 설정:
+
+```text
+PDF_PAGE_EXTRACTION_TIMEOUT_SECONDS=60
+PDF_TEXT_EXTRACTION_MODE=blocks
+PDF_TEXT_EXTRACTION_FALLBACK_MODE=text
+ENABLE_LLM_ENTITY_VALIDATION_ON_INGESTION=false
+```
+
+페이지 추출 중 timeout/failed가 발생하면 해당 페이지는 실패 row로 저장되고, 나머지 페이지 처리는 계속된다. 일부 페이지만 실패한 문서는 `partially_processed` 상태가 될 수 있다.
+
 확인:
 
 ```text
