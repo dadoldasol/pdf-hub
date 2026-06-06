@@ -4,7 +4,11 @@ import fitz
 import pytest
 
 from app.services import pdf_processing_service
-from app.services.pdf_processing_service import PdfPageExtractionTimeout, PdfProcessingService
+from app.services.pdf_processing_service import (
+    PdfPageExtractionCanceled,
+    PdfPageExtractionTimeout,
+    PdfProcessingService,
+)
 
 
 def _write_pdf(path: Path, pages: list[str]) -> None:
@@ -81,11 +85,60 @@ def test_page_extraction_timeout_terminates_worker(monkeypatch, tmp_path: Path) 
     assert FakeProcess.terminated is True
 
 
+def test_page_extraction_cancel_terminates_worker(monkeypatch, tmp_path: Path) -> None:
+    class FakeQueue:
+        def __init__(self, maxsize: int = 1) -> None:
+            self.maxsize = maxsize
+
+    class FakeProcess:
+        terminated = False
+
+        def __init__(self, target, args):  # noqa: ANN001
+            self.target = target
+            self.args = args
+
+        def start(self) -> None:
+            return None
+
+        def join(self, timeout=None) -> None:  # noqa: ANN001
+            return None
+
+        def is_alive(self) -> bool:
+            return True
+
+        def terminate(self) -> None:
+            FakeProcess.terminated = True
+
+    class FakeContext:
+        def Queue(self, maxsize: int = 1) -> FakeQueue:  # noqa: N802
+            return FakeQueue(maxsize=maxsize)
+
+        def Process(self, target, args):  # noqa: ANN001, N802
+            return FakeProcess(target, args)
+
+    monkeypatch.setattr(pdf_processing_service, "get_context", lambda method: FakeContext())
+    service = PdfProcessingService(page_timeout_seconds=30)
+
+    with pytest.raises(PdfPageExtractionCanceled):
+        service._extract_page_text_with_timeout(
+            tmp_path / "sample.pdf",
+            3,
+            cancel_check=lambda: True,
+        )
+
+    assert FakeProcess.terminated is True
+
+
 def test_iter_pages_yields_timeout_page_record(monkeypatch, tmp_path: Path) -> None:
     pdf_path = tmp_path / "timeout.pdf"
     _write_pdf(pdf_path, ["page that will time out"])
 
-    def fake_extract_page_text_with_timeout(self, pdf_path: Path, page_number: int) -> str:  # noqa: ARG001
+    def fake_extract_page_text_with_timeout(  # noqa: ARG001
+        self,
+        pdf_path: Path,
+        page_number: int,
+        cancel_check=None,
+    ) -> str:
         raise PdfPageExtractionTimeout(page_number, 0.01)
 
     monkeypatch.setattr(

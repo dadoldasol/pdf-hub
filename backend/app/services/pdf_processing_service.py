@@ -42,6 +42,12 @@ class PdfPageExtractionTimeout(Exception):
         self.timeout_seconds = timeout_seconds
 
 
+class PdfPageExtractionCanceled(Exception):
+    def __init__(self, page_number: int) -> None:
+        super().__init__(f"PDF page {page_number} extraction was canceled.")
+        self.page_number = page_number
+
+
 class PdfProcessingService:
     def __init__(
         self,
@@ -89,6 +95,7 @@ class PdfProcessingService:
         pdf_path: Path,
         before_page: Callable[[int], None] | None = None,
         skip_pages: set[int] | None = None,
+        cancel_check: Callable[[], bool] | None = None,
     ) -> Iterator[ExtractedPage]:
         with fitz.open(pdf_path) as document:
             page_count = document.page_count
@@ -101,7 +108,11 @@ class PdfProcessingService:
                 before_page(page_idx)
             started_at = perf_counter()
             try:
-                text = self._extract_page_text_with_timeout(pdf_path, page_idx).strip()
+                text = self._extract_page_text_with_timeout(
+                    pdf_path,
+                    page_idx,
+                    cancel_check=cancel_check,
+                ).strip()
                 yield ExtractedPage(
                     page_number=page_idx,
                     text=text,
@@ -117,6 +128,8 @@ class PdfProcessingService:
                     extraction_status="timeout",
                     extraction_error=str(exc),
                 )
+            except PdfPageExtractionCanceled:
+                raise
             except Exception as exc:
                 yield ExtractedPage(
                     page_number=page_idx,
@@ -127,8 +140,15 @@ class PdfProcessingService:
                     extraction_error=f"{type(exc).__name__}: {exc}",
                 )
 
-    def _extract_page_text_with_timeout(self, pdf_path: Path, page_number: int) -> str:
+    def _extract_page_text_with_timeout(
+        self,
+        pdf_path: Path,
+        page_number: int,
+        cancel_check: Callable[[], bool] | None = None,
+    ) -> str:
         if self.page_timeout_seconds <= 0:
+            if cancel_check is not None and cancel_check():
+                raise PdfPageExtractionCanceled(page_number)
             return _extract_page_text(str(pdf_path), page_number, self.text_extraction_mode)
 
         context = get_context("spawn")
@@ -138,12 +158,21 @@ class PdfProcessingService:
             args=(str(pdf_path), page_number, self.text_extraction_mode, queue),
         )
         process.start()
-        process.join(self.page_timeout_seconds)
+        started_at = perf_counter()
+        while process.is_alive():
+            if cancel_check is not None and cancel_check():
+                process.terminate()
+                process.join()
+                raise PdfPageExtractionCanceled(page_number)
 
-        if process.is_alive():
-            process.terminate()
-            process.join()
-            raise PdfPageExtractionTimeout(page_number, self.page_timeout_seconds)
+            elapsed = perf_counter() - started_at
+            remaining = self.page_timeout_seconds - elapsed
+            if remaining <= 0:
+                process.terminate()
+                process.join()
+                raise PdfPageExtractionTimeout(page_number, self.page_timeout_seconds)
+
+            process.join(min(0.5, remaining))
 
         try:
             status, payload = queue.get_nowait()

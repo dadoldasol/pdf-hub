@@ -18,7 +18,7 @@ from app.models.job import ProcessingJob
 from app.services.embedding_service import EmbeddingService
 from app.services.entity_extraction_service import EntityCandidate, EntityExtractionService
 from app.services.entity_validation_service import EntityValidationService
-from app.services.pdf_processing_service import PdfProcessingService
+from app.services.pdf_processing_service import PdfPageExtractionCanceled, PdfProcessingService
 
 
 class JobCanceled(Exception):
@@ -87,7 +87,7 @@ def run_ingestion_job(job_id: UUID) -> None:
         job.finished_at = datetime.now(UTC)
         document.status = final_status if final_status == "partially_processed" else "processed"
         db.commit()
-    except JobCanceled:
+    except (JobCanceled, PdfPageExtractionCanceled):
         db.rollback()
         job = db.get(ProcessingJob, job_id)
         if job is not None:
@@ -177,6 +177,7 @@ def _extract_pages_and_chunks(
         pdf_path,
         before_page=mark_page_started,
         skip_pages=completed_page_numbers,
+        cancel_check=lambda: _is_cancel_requested(db, job),
     ):
         _raise_if_canceled(db, job)
         _set_job_progress(
@@ -381,9 +382,13 @@ def _set_job_progress(job: ProcessingJob, status: str, **metadata_updates: objec
 
 
 def _raise_if_canceled(db: Session, job: ProcessingJob) -> None:
-    db.refresh(job)
-    if (job.extra_metadata or {}).get("cancel_requested"):
+    if _is_cancel_requested(db, job):
         raise JobCanceled
+
+
+def _is_cancel_requested(db: Session, job: ProcessingJob) -> bool:
+    db.refresh(job)
+    return bool((job.extra_metadata or {}).get("cancel_requested"))
 
 
 def _mark_job_canceled(job: ProcessingJob, document: Document | None) -> None:

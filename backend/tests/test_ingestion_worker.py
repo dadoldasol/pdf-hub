@@ -9,6 +9,7 @@ from app.models.job import ProcessingJob
 from app.workers import ingestion_worker
 from app.workers.ingestion_worker import run_ingestion_job
 from app.workers.worker_main import claim_next_queued_job
+from app.services.pdf_processing_service import PdfPageExtractionCanceled
 
 
 def test_ingestion_job_marks_document_failed_for_invalid_pdf_path(db_session, document) -> None:
@@ -67,7 +68,7 @@ def test_ingestion_commits_each_page_before_later_extraction_failure(
         def get_page_count(self, pdf_path):  # noqa: ANN001
             return 2
 
-        def iter_pages(self, pdf_path, before_page=None, skip_pages=None):  # noqa: ANN001, ARG002
+        def iter_pages(self, pdf_path, before_page=None, skip_pages=None, cancel_check=None):  # noqa: ANN001, ARG002
             if before_page is not None:
                 before_page(1)
             yield SimpleNamespace(
@@ -125,7 +126,7 @@ def test_ingestion_marks_document_partially_processed_for_failed_pages(
         def get_page_count(self, pdf_path):  # noqa: ANN001
             return 2
 
-        def iter_pages(self, pdf_path, before_page=None, skip_pages=None):  # noqa: ANN001, ARG002
+        def iter_pages(self, pdf_path, before_page=None, skip_pages=None, cancel_check=None):  # noqa: ANN001, ARG002
             for page_number, status in [(1, "completed"), (2, "timeout")]:
                 if before_page is not None:
                     before_page(page_number)
@@ -184,7 +185,7 @@ def test_ingestion_resume_keeps_completed_pages_and_processes_remaining(
         def get_page_count(self, pdf_path):  # noqa: ANN001
             return 2
 
-        def iter_pages(self, pdf_path, before_page=None, skip_pages=None):  # noqa: ANN001
+        def iter_pages(self, pdf_path, before_page=None, skip_pages=None, cancel_check=None):  # noqa: ANN001, ARG002
             FakePdfProcessingService.seen_skip_pages = set(skip_pages or set())
             if before_page is not None:
                 before_page(2)
@@ -248,6 +249,43 @@ def test_ingestion_resume_keeps_completed_pages_and_processes_remaining(
         db_session.execute(delete(EntityMention).where(EntityMention.document_id == document.id))
         db_session.execute(delete(DocumentChunk).where(DocumentChunk.document_id == document.id))
         db_session.execute(delete(DocumentPage).where(DocumentPage.document_id == document.id))
+        db_session.execute(delete(ProcessingJob).where(ProcessingJob.id == job.id))
+        db_session.delete(document)
+        db_session.commit()
+
+
+def test_ingestion_marks_job_canceled_when_page_extraction_is_canceled(
+    db_session,
+    document,
+    monkeypatch,
+) -> None:
+    class FakePdfProcessingService:
+        def get_page_count(self, pdf_path):  # noqa: ANN001
+            return 1
+
+        def iter_pages(self, pdf_path, before_page=None, skip_pages=None, cancel_check=None):  # noqa: ANN001, ARG002
+            if before_page is not None:
+                before_page(1)
+            raise PdfPageExtractionCanceled(1)
+            yield
+
+    document.storage_path = "fake.pdf"
+    document.status = "uploaded"
+    job = ProcessingJob(document_id=document.id, status="queued", extra_metadata={})
+    db_session.add(job)
+    db_session.commit()
+    monkeypatch.setattr(ingestion_worker, "PdfProcessingService", FakePdfProcessingService)
+
+    try:
+        run_ingestion_job(job.id)
+
+        db_session.refresh(document)
+        db_session.refresh(job)
+
+        assert document.status == "canceled"
+        assert job.status == "canceled"
+        assert job.extra_metadata["stage"] == "canceled"
+    finally:
         db_session.execute(delete(ProcessingJob).where(ProcessingJob.id == job.id))
         db_session.delete(document)
         db_session.commit()
