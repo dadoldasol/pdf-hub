@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     ingestion_worker_poll_interval_seconds: float = 2.0
     ingestion_worker_max_jobs: int = 1
     enable_embeddings_on_upload: bool = True
+    pdf_page_extraction_timeout_seconds: float = 60.0
     pdf_text_extraction_mode: str = "blocks"
     llm_provider: str = "openai"
     enable_llm_entity_validation: bool = False

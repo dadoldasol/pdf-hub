@@ -1,6 +1,9 @@
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
+from multiprocessing import get_context
+from multiprocessing.queues import Queue
 from pathlib import Path
+from queue import Empty
 from time import perf_counter
 
 import fitz
@@ -30,6 +33,13 @@ class ExtractedPdf:
     chunks: list[ExtractedChunk]
 
 
+class PdfPageExtractionTimeout(Exception):
+    def __init__(self, page_number: int, timeout_seconds: float) -> None:
+        super().__init__(f"PDF page {page_number} extraction exceeded {timeout_seconds:g} seconds.")
+        self.page_number = page_number
+        self.timeout_seconds = timeout_seconds
+
+
 class PdfProcessingService:
     def __init__(
         self,
@@ -37,11 +47,17 @@ class PdfProcessingService:
         chunk_overlap: int = 200,
         min_text_length_for_ocr: int = 20,
         text_extraction_mode: str | None = None,
+        page_timeout_seconds: float | None = None,
     ) -> None:
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
         self.min_text_length_for_ocr = min_text_length_for_ocr
         self.text_extraction_mode = text_extraction_mode or settings.pdf_text_extraction_mode
+        self.page_timeout_seconds = (
+            settings.pdf_page_extraction_timeout_seconds
+            if page_timeout_seconds is None
+            else page_timeout_seconds
+        )
 
     def extract(self, pdf_path: Path) -> ExtractedPdf:
         pages: list[ExtractedPage] = []
@@ -68,30 +84,47 @@ class PdfProcessingService:
 
     def iter_pages(self, pdf_path: Path, before_page: Callable[[int], None] | None = None) -> Iterator[ExtractedPage]:
         with fitz.open(pdf_path) as document:
-            for page_idx, page in enumerate(document, start=1):
-                if before_page is not None:
-                    before_page(page_idx)
-                started_at = perf_counter()
-                text = self._extract_text(page).strip()
-                yield ExtractedPage(
-                    page_number=page_idx,
-                    text=text,
-                    needs_ocr=len(text) < self.min_text_length_for_ocr,
-                    extraction_seconds=perf_counter() - started_at,
-                )
+            page_count = document.page_count
 
-    def _extract_text(self, page: fitz.Page) -> str:
-        if self.text_extraction_mode == "blocks":
-            blocks = page.get_text("blocks")
-            text_blocks = [
-                (block[1], block[0], block[4])
-                for block in blocks
-                if len(block) >= 7 and block[6] == 0 and str(block[4]).strip()
-            ]
-            text_blocks.sort(key=lambda block: (block[0], block[1]))
-            return "\n".join(block[2].rstrip() for block in text_blocks)
+        for page_idx in range(1, page_count + 1):
+            if before_page is not None:
+                before_page(page_idx)
+            started_at = perf_counter()
+            text = self._extract_page_text_with_timeout(pdf_path, page_idx).strip()
+            yield ExtractedPage(
+                page_number=page_idx,
+                text=text,
+                needs_ocr=len(text) < self.min_text_length_for_ocr,
+                extraction_seconds=perf_counter() - started_at,
+            )
 
-        return page.get_text("text")
+    def _extract_page_text_with_timeout(self, pdf_path: Path, page_number: int) -> str:
+        if self.page_timeout_seconds <= 0:
+            return _extract_page_text(str(pdf_path), page_number, self.text_extraction_mode)
+
+        context = get_context("spawn")
+        queue: Queue = context.Queue(maxsize=1)
+        process = context.Process(
+            target=_extract_page_text_worker,
+            args=(str(pdf_path), page_number, self.text_extraction_mode, queue),
+        )
+        process.start()
+        process.join(self.page_timeout_seconds)
+
+        if process.is_alive():
+            process.terminate()
+            process.join()
+            raise PdfPageExtractionTimeout(page_number, self.page_timeout_seconds)
+
+        try:
+            status, payload = queue.get_nowait()
+        except Empty as exc:
+            raise RuntimeError(f"PDF page {page_number} extraction worker exited without output.") from exc
+
+        if status == "error":
+            raise RuntimeError(f"PDF page {page_number} extraction failed: {payload}")
+
+        return str(payload)
 
     def chunk_text(self, text: str) -> list[str]:
         normalized = "\n".join(line.rstrip() for line in text.splitlines()).strip()
@@ -126,3 +159,31 @@ class PdfProcessingService:
             start = max(end - self.chunk_overlap, 0)
 
         return chunks
+
+
+def _extract_page_text_worker(
+    pdf_path: str,
+    page_number: int,
+    text_extraction_mode: str,
+    queue: Queue,
+) -> None:
+    try:
+        queue.put(("ok", _extract_page_text(pdf_path, page_number, text_extraction_mode)))
+    except Exception as exc:
+        queue.put(("error", f"{type(exc).__name__}: {exc}"))
+
+
+def _extract_page_text(pdf_path: str, page_number: int, text_extraction_mode: str) -> str:
+    with fitz.open(pdf_path) as document:
+        page = document.load_page(page_number - 1)
+        if text_extraction_mode == "blocks":
+            blocks = page.get_text("blocks")
+            text_blocks = [
+                (block[1], block[0], block[4])
+                for block in blocks
+                if len(block) >= 7 and block[6] == 0 and str(block[4]).strip()
+            ]
+            text_blocks.sort(key=lambda block: (block[0], block[1]))
+            return "\n".join(block[2].rstrip() for block in text_blocks)
+
+        return page.get_text("text")
