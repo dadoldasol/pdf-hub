@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     enable_embeddings_on_upload: bool = True
     pdf_page_extraction_timeout_seconds: float = 60.0
     pdf_text_extraction_mode: str = "blocks"
+    pdf_text_extraction_fallback_mode: str | None = "text"
     llm_provider: str = "openai"
     enable_llm_entity_validation: bool = False
     entity_validation_batch_size: int = 20

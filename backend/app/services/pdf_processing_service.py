@@ -55,12 +55,18 @@ class PdfProcessingService:
         chunk_overlap: int = 200,
         min_text_length_for_ocr: int = 20,
         text_extraction_mode: str | None = None,
+        fallback_text_extraction_mode: str | None = None,
         page_timeout_seconds: float | None = None,
     ) -> None:
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
         self.min_text_length_for_ocr = min_text_length_for_ocr
         self.text_extraction_mode = text_extraction_mode or settings.pdf_text_extraction_mode
+        self.fallback_text_extraction_mode = (
+            settings.pdf_text_extraction_fallback_mode
+            if fallback_text_extraction_mode is None
+            else fallback_text_extraction_mode
+        )
         self.page_timeout_seconds = (
             settings.pdf_page_extraction_timeout_seconds
             if page_timeout_seconds is None
@@ -108,7 +114,7 @@ class PdfProcessingService:
                 before_page(page_idx)
             started_at = perf_counter()
             try:
-                text = self._extract_page_text_with_timeout(
+                text = self._extract_page_text_with_fallback(
                     pdf_path,
                     page_idx,
                     cancel_check=cancel_check,
@@ -140,22 +146,59 @@ class PdfProcessingService:
                     extraction_error=f"{type(exc).__name__}: {exc}",
                 )
 
-    def _extract_page_text_with_timeout(
+    def _extract_page_text_with_fallback(
         self,
         pdf_path: Path,
         page_number: int,
         cancel_check: Callable[[], bool] | None = None,
     ) -> str:
+        try:
+            return self._extract_page_text_with_timeout(
+                pdf_path,
+                page_number,
+                text_extraction_mode=self.text_extraction_mode,
+                cancel_check=cancel_check,
+            )
+        except PdfPageExtractionCanceled:
+            raise
+        except Exception as primary_exc:
+            fallback_mode = self.fallback_text_extraction_mode
+            if not fallback_mode or fallback_mode == self.text_extraction_mode:
+                raise
+
+            try:
+                return self._extract_page_text_with_timeout(
+                    pdf_path,
+                    page_number,
+                    text_extraction_mode=fallback_mode,
+                    cancel_check=cancel_check,
+                )
+            except PdfPageExtractionCanceled:
+                raise
+            except Exception as fallback_exc:
+                raise RuntimeError(
+                    f"primary {self.text_extraction_mode} extraction failed: {primary_exc}; "
+                    f"fallback {fallback_mode} extraction failed: {fallback_exc}"
+                ) from fallback_exc
+
+    def _extract_page_text_with_timeout(
+        self,
+        pdf_path: Path,
+        page_number: int,
+        text_extraction_mode: str | None = None,
+        cancel_check: Callable[[], bool] | None = None,
+    ) -> str:
+        extraction_mode = text_extraction_mode or self.text_extraction_mode
         if self.page_timeout_seconds <= 0:
             if cancel_check is not None and cancel_check():
                 raise PdfPageExtractionCanceled(page_number)
-            return _extract_page_text(str(pdf_path), page_number, self.text_extraction_mode)
+            return _extract_page_text(str(pdf_path), page_number, extraction_mode)
 
         context = get_context("spawn")
         queue: Queue = context.Queue(maxsize=1)
         process = context.Process(
             target=_extract_page_text_worker,
-            args=(str(pdf_path), page_number, self.text_extraction_mode, queue),
+            args=(str(pdf_path), page_number, extraction_mode, queue),
         )
         process.start()
         started_at = perf_counter()

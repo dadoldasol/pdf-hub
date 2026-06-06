@@ -137,6 +137,7 @@ def test_iter_pages_yields_timeout_page_record(monkeypatch, tmp_path: Path) -> N
         self,
         pdf_path: Path,
         page_number: int,
+        text_extraction_mode: str | None = None,
         cancel_check=None,
     ) -> str:
         raise PdfPageExtractionTimeout(page_number, 0.01)
@@ -147,13 +148,58 @@ def test_iter_pages_yields_timeout_page_record(monkeypatch, tmp_path: Path) -> N
         fake_extract_page_text_with_timeout,
     )
 
-    page = next(iter(PdfProcessingService(page_timeout_seconds=0.01).iter_pages(pdf_path)))
+    page = next(
+        iter(
+            PdfProcessingService(
+                fallback_text_extraction_mode="",
+                page_timeout_seconds=0.01,
+            ).iter_pages(pdf_path)
+        )
+    )
 
     assert page.page_number == 1
     assert page.text == ""
     assert page.needs_ocr is True
     assert page.extraction_status == "timeout"
     assert "exceeded" in (page.extraction_error or "")
+
+
+def test_iter_pages_uses_fallback_mode_after_primary_failure(monkeypatch, tmp_path: Path) -> None:
+    pdf_path = tmp_path / "fallback.pdf"
+    _write_pdf(pdf_path, ["fallback page"])
+    modes: list[str | None] = []
+
+    def fake_extract_page_text_with_timeout(  # noqa: ARG001
+        self,
+        pdf_path: Path,
+        page_number: int,
+        text_extraction_mode: str | None = None,
+        cancel_check=None,
+    ) -> str:
+        modes.append(text_extraction_mode)
+        if text_extraction_mode == "blocks":
+            raise RuntimeError("blocks failed")
+        return "fallback text"
+
+    monkeypatch.setattr(
+        PdfProcessingService,
+        "_extract_page_text_with_timeout",
+        fake_extract_page_text_with_timeout,
+    )
+
+    page = next(
+        iter(
+            PdfProcessingService(
+                text_extraction_mode="blocks",
+                fallback_text_extraction_mode="text",
+                page_timeout_seconds=0.01,
+            ).iter_pages(pdf_path)
+        )
+    )
+
+    assert modes == ["blocks", "text"]
+    assert page.text == "fallback text"
+    assert page.extraction_status == "completed"
 
 
 def test_iter_pages_skips_requested_pages(tmp_path: Path) -> None:
