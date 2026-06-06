@@ -293,7 +293,9 @@ def _extract_entities(db: Session, job: ProcessingJob, document_id: UUID, chunk_
     db.commit()
 
     extraction_service = EntityExtractionService()
-    validation_service = EntityValidationService()
+    validation_service = EntityValidationService(
+        enabled=settings.enable_llm_entity_validation_on_ingestion,
+    )
     db.execute(delete(EntityMention).where(EntityMention.document_id == document_id))
     db.commit()
     _raise_if_canceled(db, job)

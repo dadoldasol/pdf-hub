@@ -25,6 +25,16 @@ def test_validation_disabled_accepts_rule_candidates(monkeypatch) -> None:
     assert result.llm_used is False
 
 
+def test_validation_can_be_disabled_with_constructor_override(monkeypatch) -> None:
+    monkeypatch.setattr("app.services.entity_validation_service.settings.enable_llm_entity_validation", True)
+    service = EntityValidationService(enabled=False)
+
+    result = service.validate_candidates([_candidate()], "IFE appears in the ISP pipeline.")
+
+    assert result.accepted_candidates[0].name == "IFE"
+    assert result.llm_used is False
+
+
 def test_validation_falls_back_when_model_is_missing(monkeypatch) -> None:
     monkeypatch.setattr("app.services.entity_validation_service.settings.enable_llm_entity_validation", True)
     monkeypatch.setattr("app.services.entity_validation_service.settings.openai_api_key", "test-key")

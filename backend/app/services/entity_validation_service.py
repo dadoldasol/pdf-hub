@@ -55,8 +55,8 @@ class EntityValidationService:
         "required": ["entities"],
     }
 
-    def __init__(self) -> None:
-        self.enabled = settings.enable_llm_entity_validation
+    def __init__(self, enabled: bool | None = None) -> None:
+        self.enabled = settings.enable_llm_entity_validation if enabled is None else enabled
         self.provider = settings.llm_provider.lower()
         self.api_key = settings.openai_api_key
         self.model = settings.entity_validation_model or settings.llm_model

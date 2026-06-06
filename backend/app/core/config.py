@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     pdf_text_extraction_fallback_mode: str | None = "text"
     llm_provider: str = "openai"
     enable_llm_entity_validation: bool = False
+    enable_llm_entity_validation_on_ingestion: bool = False
     entity_validation_batch_size: int = 20
     entity_validation_model: str | None = None
     openai_base_url: str = "https://api.openai.com/v1"
