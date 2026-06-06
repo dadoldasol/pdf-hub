@@ -188,9 +188,8 @@ def _extract_pages_and_chunks(
             current_page_status="chunked",
             last_chunk_seconds=round(perf_counter() - chunk_started_at, 3),
         )
-        if page.page_number % settings.ingestion_batch_pages == 0:
-            db.commit()
-            _raise_if_canceled(db, job)
+        db.commit()
+        _raise_if_canceled(db, job)
 
     db.commit()
     _raise_if_canceled(db, job)
