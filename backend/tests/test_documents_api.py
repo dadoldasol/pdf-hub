@@ -84,3 +84,51 @@ def test_refine_document_reuses_completed_job_unless_forced(db_session, document
         assert force_response.json()["duplicate"] is False
     finally:
         DocumentService(db_session).delete_document(document.id)
+
+
+def test_list_documents_includes_latest_refinement_status(db_session, document) -> None:
+    client = TestClient(app)
+    older_job = ProcessingJob(
+        document_id=document.id,
+        status="completed",
+        extra_metadata={
+            "job_type": "llm_refinement",
+            "stage": "completed",
+            "processed_entities": 3,
+            "total_entities": 3,
+            "failed_entities": 0,
+        },
+    )
+    db_session.add(older_job)
+    db_session.commit()
+
+    latest_job = ProcessingJob(
+        document_id=document.id,
+        status="refining_entities",
+        extra_metadata={
+            "job_type": "llm_refinement",
+            "stage": "refining_entities",
+            "processed_entities": 1,
+            "total_entities": 4,
+            "failed_entities": 1,
+        },
+    )
+    db_session.add(latest_job)
+    db_session.commit()
+
+    try:
+        response = client.get("/api/documents")
+
+        assert response.status_code == 200
+        payload = response.json()
+        document_payload = next(item for item in payload if item["id"] == str(document.id))
+        refinement_job = document_payload["refinement_job"]
+
+        assert refinement_job["id"] == str(latest_job.id)
+        assert refinement_job["status"] == "refining_entities"
+        assert refinement_job["stage"] == "refining_entities"
+        assert refinement_job["processed_entities"] == 1
+        assert refinement_job["total_entities"] == 4
+        assert refinement_job["failed_entities"] == 1
+    finally:
+        DocumentService(db_session).delete_document(document.id)

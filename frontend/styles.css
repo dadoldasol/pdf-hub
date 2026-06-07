@@ -369,6 +369,16 @@ input[type="search"] {
   font-size: 12px;
 }
 
+.refinement-status {
+  width: fit-content;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .result-tags,
 .entity-list {
   display: flex;

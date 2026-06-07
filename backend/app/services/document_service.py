@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from uuid import UUID
 
@@ -14,6 +16,17 @@ from app.services.storage_service import StorageService
 
 
 TERMINAL_JOB_STATUSES = {"completed", "partially_processed", "failed", "canceled"}
+
+
+@dataclass(frozen=True)
+class DocumentJobSummary:
+    id: UUID
+    status: str
+    stage: str | None
+    processed_entities: int | None
+    total_entities: int | None
+    failed_entities: int | None
+    updated_at: datetime
 
 
 class DocumentService:
@@ -52,10 +65,15 @@ class DocumentService:
         return document, job, False
 
     def list_documents(self) -> list[Document]:
-        return list(self.db.scalars(select(Document).order_by(Document.created_at.desc())))
+        documents = list(self.db.scalars(select(Document).order_by(Document.created_at.desc())))
+        self._attach_refinement_jobs(documents)
+        return documents
 
     def get_document(self, document_id: UUID) -> Document | None:
-        return self.db.get(Document, document_id)
+        document = self.db.get(Document, document_id)
+        if document is not None:
+            self._attach_refinement_jobs([document])
+        return document
 
     def get_document_by_hash(self, file_hash: str) -> Document | None:
         return self.db.scalar(select(Document).where(Document.file_hash == file_hash))
@@ -188,3 +206,37 @@ class DocumentService:
             node = self.db.get(KnowledgeNode, node_id)
             if node is not None and node.entity_id is None:
                 self.db.delete(node)
+
+    def _attach_refinement_jobs(self, documents: list[Document]) -> None:
+        if not documents:
+            return
+
+        document_ids = [document.id for document in documents]
+        jobs = list(
+            self.db.scalars(
+                select(ProcessingJob)
+                .where(ProcessingJob.document_id.in_(document_ids))
+                .order_by(ProcessingJob.created_at.desc())
+            )
+        )
+        latest_by_document: dict[UUID, ProcessingJob] = {}
+        for job in jobs:
+            if (job.extra_metadata or {}).get("job_type") != "llm_refinement":
+                continue
+            latest_by_document.setdefault(job.document_id, job)
+
+        for document in documents:
+            job = latest_by_document.get(document.id)
+            document.refinement_job = self._job_summary(job) if job is not None else None
+
+    def _job_summary(self, job: ProcessingJob) -> DocumentJobSummary:
+        metadata = job.extra_metadata or {}
+        return DocumentJobSummary(
+            id=job.id,
+            status=job.status,
+            stage=metadata.get("stage"),
+            processed_entities=metadata.get("processed_entities"),
+            total_entities=metadata.get("total_entities"),
+            failed_entities=metadata.get("failed_entities"),
+            updated_at=job.updated_at,
+        )

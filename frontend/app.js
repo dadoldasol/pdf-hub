@@ -120,6 +120,7 @@ function renderDocuments() {
     row.innerHTML = `
       <div class="item-title">${escapeHtml(documentItem.title)}</div>
       <div class="item-meta">${escapeHtml(documentItem.status)} · ${documentItem.page_count ?? 0}p · ${formatDate(documentItem.created_at)}</div>
+      <div class="refinement-status">${formatRefinementStatus(documentItem.refinement_job)}</div>
     `;
     row.insertAdjacentHTML("beforeend", '<button class="item-delete danger-button" type="button">삭제</button>');
     row.querySelector(".item-delete").addEventListener("click", () => {
@@ -127,6 +128,32 @@ function renderDocuments() {
     });
     el.documentList.append(row);
   }
+}
+
+function formatRefinementStatus(refinementJob) {
+  if (!refinementJob) return "LLM 정제: 대기 없음";
+
+  const status = refinementJob.status || "unknown";
+  const total = Number(refinementJob.total_entities || 0);
+  const processed = Number(refinementJob.processed_entities || 0);
+  const failed = Number(refinementJob.failed_entities || 0);
+  const counts = total ? ` ${processed}/${total}` : "";
+  const failedText = failed ? `, 실패 ${failed}` : "";
+  return `LLM 정제: ${formatRefinementStatusLabel(status)}${counts}${failedText}`;
+}
+
+function formatRefinementStatusLabel(status) {
+  const labels = {
+    queued: "대기",
+    extracting_context: "컨텍스트 수집",
+    refining_entities: "엔티티 정제",
+    generating_cards: "카드 생성",
+    completed: "완료",
+    partially_processed: "부분 완료",
+    failed: "실패",
+    canceled: "취소",
+  };
+  return labels[status] || status;
 }
 
 function renderEntities() {

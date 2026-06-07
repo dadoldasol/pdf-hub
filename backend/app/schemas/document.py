@@ -28,6 +28,16 @@ class DocumentRefineResponse(BaseModel):
     duplicate: bool = False
 
 
+class DocumentJobSummary(BaseModel):
+    id: UUID
+    status: str
+    stage: str | None = None
+    processed_entities: int | None = None
+    total_entities: int | None = None
+    failed_entities: int | None = None
+    updated_at: datetime
+
+
 class DocumentListItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -37,6 +47,7 @@ class DocumentListItem(BaseModel):
     status: str
     page_count: int | None
     created_at: datetime
+    refinement_job: DocumentJobSummary | None = None
 
 
 class DocumentDetail(DocumentListItem):
