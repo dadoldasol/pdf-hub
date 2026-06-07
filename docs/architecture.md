@@ -28,6 +28,13 @@ Ingestion Worker
   - rule 기반 엔티티 추출
   - 실패 페이지 기록
 
+LLM Refinement Worker
+  - ingestion 완료 후 자동 생성된 refinement job 처리
+  - entity별 evidence snippet 수집
+  - entity description 생성
+  - knowledge card summary/details 생성
+  - LLM 실패 entity 기록
+
 Storage
   PostgreSQL + pgvector
   - 문서 메타데이터
@@ -56,8 +63,10 @@ File Storage
 8. 청크 분할
 9. 청크별 임베딩 생성
 10. rule/pattern entity 추출
-11. 검색 인덱스 및 관계 테이블 저장
-12. Frontend에서 검색/지식 카드/그래프 조회
+11. entity mention 저장
+12. ingestion 완료 후 llm_refinement job 자동 생성
+13. refinement worker가 entity별 LLM description/knowledge card 생성
+14. Frontend에서 검색/지식 카드/그래프 조회
 ```
 
 ## 3. 주요 컴포넌트
@@ -67,7 +76,8 @@ File Storage
 | FastAPI App | REST API 제공 |
 | PDF Processor | 텍스트, 표, 이미지 기반 여부 추출 |
 | Chunker | 페이지 텍스트를 검색 가능한 단위로 분할 |
-| LLM Extractor | 요약, 엔티티, 관계, 분류 생성 |
+| Ingestion Worker | 안정적인 PDF 처리와 rule/pattern entity 저장 |
+| LLM Refinement Worker | entity description과 knowledge card를 후처리로 생성 |
 | Embedding Service | 청크와 엔티티 설명을 벡터화 |
 | Search Service | 키워드/벡터/하이브리드 검색 |
 | Graph Service | 엔티티 관계 저장 및 탐색 |
@@ -94,9 +104,13 @@ PDF 처리와 LLM 호출은 요청 시간 안에 끝내지 않는다.
 현재 기본값:
 
 - API 요청에서 업로드만 처리
-- 처리 작업은 별도 worker 프로세스에서 실행
+- 처리 작업은 별도 worker 프로세스에서 실행한다.
 - worker는 PostgreSQL의 `queued` job을 polling/claim한다.
+- worker는 `processing_jobs.extra_metadata.job_type`으로 `ingestion`과 `llm_refinement`를 구분한다.
 - 페이지 추출은 child process로 격리하고 timeout/cancel 시 terminate한다.
+- upload ingestion 중에는 LLM을 호출하지 않는다.
+- LLM refinement는 ingestion 완료 후 별도 job으로 실행한다.
+- LLM 호출 중에는 DB transaction을 오래 잡지 않는다.
 - 일부 페이지 실패 시 문서는 `partially_processed`가 될 수 있다.
 - 작업 상태는 DB에 저장
 

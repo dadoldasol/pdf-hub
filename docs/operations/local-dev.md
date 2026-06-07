@@ -114,7 +114,39 @@ alembic upgrade head
 - `knowledge_edges`
 - `processing_jobs`
 
-## 8. Backend 실행
+## 8. 개발 서버 실행
+
+프로젝트 루트에서 backend API, worker, frontend를 함께 실행할 수 있다.
+
+Windows:
+
+```powershell
+.\scripts\dev.cmd start --with-postgres
+```
+
+Ubuntu/bash:
+
+```bash
+bash scripts/dev.sh start --with-postgres
+```
+
+상태와 종료:
+
+```powershell
+.\scripts\dev.cmd status
+.\scripts\dev.cmd logs
+.\scripts\dev.cmd stop
+```
+
+```bash
+bash scripts/dev.sh status
+bash scripts/dev.sh logs
+bash scripts/dev.sh stop
+```
+
+스크립트는 `.dev/` 아래에 pid와 log를 저장한다.
+
+## 9. Backend 수동 실행
 
 backend 디렉토리에서 실행한다.
 
@@ -122,7 +154,7 @@ backend 디렉토리에서 실행한다.
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
 ```
 
-PDF 업로드는 처리 job을 `queued` 상태로 만든 뒤 바로 반환한다. 실제 PDF 추출/청크/임베딩 처리는 별도 터미널에서 ingestion worker를 실행해야 진행된다.
+PDF 업로드는 처리 job을 `queued` 상태로 만든 뒤 바로 반환한다. 실제 PDF 추출/청크/임베딩과 후속 LLM refinement는 별도 worker를 실행해야 진행된다.
 
 ```powershell
 .\.venv\Scripts\python.exe -m app.workers.worker_main
@@ -140,8 +172,18 @@ PDF 업로드는 처리 job을 `queued` 상태로 만든 뒤 바로 반환한다
 PDF_PAGE_EXTRACTION_TIMEOUT_SECONDS=60
 PDF_TEXT_EXTRACTION_MODE=blocks
 PDF_TEXT_EXTRACTION_FALLBACK_MODE=text
-ENABLE_LLM_ENTITY_VALIDATION_ON_INGESTION=false
 ```
+
+LLM refinement 관련 주요 설정:
+
+```text
+ENABLE_LLM_ENTITY_VALIDATION=true
+LLM_PROVIDER=ollama
+ENTITY_VALIDATION_MODEL=qwen3:8b
+OLLAMA_BASE_URL=http://localhost:11434
+```
+
+Upload ingestion 중에는 LLM을 호출하지 않는다. ingestion 완료 후 자동 생성되는 `llm_refinement` job이 entity description과 knowledge card summary를 천천히 갱신한다.
 
 페이지 추출 중 timeout/failed가 발생하면 해당 페이지는 실패 row로 저장되고, 나머지 페이지 처리는 계속된다. 일부 페이지만 실패한 문서는 `partially_processed` 상태가 될 수 있다.
 
@@ -152,7 +194,7 @@ http://127.0.0.1:8000/health
 http://127.0.0.1:8000/docs
 ```
 
-## 9. Frontend 실행
+## 10. Frontend 수동 실행
 
 프로젝트 루트에서 실행한다.
 

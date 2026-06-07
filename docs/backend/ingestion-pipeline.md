@@ -1,42 +1,58 @@
 # Ingestion Pipeline
 
-이 문서는 PDF 업로드 이후 파일 저장, 작업 생성, 텍스트 추출, chunk 생성, embedding, entity/relation 추출, knowledge card 생성까지의 처리 흐름을 정의한다.
+이 문서는 PDF 업로드 이후 파일 저장, 작업 생성, 텍스트 추출, chunk 생성, embedding, rule/pattern entity 저장, 그리고 후속 LLM refinement job까지의 처리 흐름을 정의한다.
 
-## MVP 현재 흐름
+## 현재 처리 흐름
+
+Upload ingestion은 안정성을 최우선으로 한다. API 요청은 긴 PDF 처리를 직접 수행하지 않고, worker가 별도 process에서 job을 처리한다.
 
 ```text
 POST /api/documents/upload
   -> original PDF 저장
   -> documents record 생성
   -> processing_jobs record 생성
+       extra_metadata.job_type = "ingestion"
   -> API request는 queued job을 반환하고 종료
-  -> 별도 ingestion worker가 queued job claim
+
+worker_main
+  -> queued job claim
+  -> job_type이 ingestion이면 run_ingestion_job 실행
   -> page text를 페이지별 child process에서 timeout 격리 추출
   -> page 단위 document_pages/document_chunks 저장 및 commit
   -> deterministic embedding 생성
   -> rule/pattern entity 추출
   -> entity_mentions 저장
-  -> 검색/지식카드/그래프 API에서 조회
+  -> ingestion completed 또는 partially_processed
+  -> llm_refinement job 자동 생성
 ```
 
-현재 흐름은 큰 PDF 처리 중 API 서버가 같이 멈추지 않도록 API와 worker를 분리한다. 특정 페이지 추출이 timeout/failed 되어도 실패 페이지 row를 남기고 나머지 페이지 처리를 계속한다.
+업로드 중에는 LLM을 호출하지 않는다. 긴 PDF에서 Ollama/OpenAI 호출이 ingestion 전체를 지연시키거나 DB transaction을 오래 잡는 문제를 막기 위해서다.
 
-## MVP 이후 개선 흐름
+## 후속 LLM Refinement 흐름
+
+Ingestion이 끝나면 같은 document에 대해 별도 refinement job이 자동으로 queued 된다.
 
 ```text
-1. PDF 저장 및 job 생성
-2. page text 추출
-3. section-aware chunking
-4. chunk embedding 생성
-5. entity candidate 추출
-6. entity normalization/filtering/ranking
-7. LLM entity validation
-8. relation extraction
-9. entity-centric context aggregation
-10. knowledge card generation
-11. graph node/edge 저장 또는 갱신
-12. job 완료
+processing_jobs
+  extra_metadata.job_type = "llm_refinement"
+
+worker_main
+  -> queued job claim
+  -> job_type이 llm_refinement이면 run_llm_refinement_job 실행
+  -> document의 entity mentions 조회
+  -> entity별 snippet evidence aggregation
+  -> DB transaction 밖에서 LLM 호출
+  -> entity description과 knowledge card metadata 저장
+  -> entity 하나마다 commit
+  -> completed / partially_processed / failed
 ```
+
+저장 위치:
+
+- `entities.description`
+- `entities.confidence`
+- `entities.extra_metadata["knowledge_card"]`
+- `entities.extra_metadata["llm_refinement"]`
 
 ## Document Lifecycle 전처리
 
@@ -51,7 +67,7 @@ upload request
        return existing document with duplicate=true
   -> if new:
        create document
-       create processing job
+       create ingestion processing job
        return queued job
 ```
 
@@ -74,91 +90,48 @@ DELETE /api/documents/{document_id}
   -> remove orphan entities/nodes
 ```
 
-## 손봐야 할 단계
+## Job Type
 
-### 1. Chunking
+현재 `processing_jobs`는 `extra_metadata.job_type`으로 작업 종류를 구분한다.
 
-Knowledge card와 relation extraction 품질은 chunk 품질에 크게 의존한다. 단순 길이 기반 chunk만 사용하면 개념 설명이 끊기거나, 너무 많은 노이즈가 포함될 수 있다.
+| job_type | 역할 |
+|---|---|
+| `ingestion` | PDF 추출, chunk, embedding, rule/pattern entity 저장 |
+| `llm_refinement` | entity description과 knowledge card summary 생성/갱신 |
 
-보완 기준:
-
-- page number와 chunk id는 항상 유지한다.
-- section heading, bullet, table-like block을 가능한 한 보존한다.
-- entity mention 주변의 앞뒤 chunk를 context로 가져올 수 있도록 chunk index를 안정적으로 유지한다.
-- 너무 짧은 chunk는 검색/LLM 입력 전에 병합 후보로 둔다.
-
-관련 모듈:
-
-- `backend/app/services/pdf_processing_service.py`
-- `backend/app/workers/ingestion_worker.py`
-
-### 2. Entity 정제
-
-현재 rule/pattern 추출은 후보를 넓게 잡는 데 유리하지만, 사용자에게 그대로 노출하기에는 노이즈가 많다.
-
-보완 기준:
-
-- stopword/banlist를 도입한다.
-- entity type별 allowlist와 validation rule을 둔다.
-- mention count, page spread, source quality, confidence로 ranking한다.
-- normalize key를 기준으로 중복 entity를 merge한다.
-- 낮은 confidence entity는 기본 UI 목록에서 숨긴다.
-
-관련 모듈:
-
-- `backend/app/services/entity_extraction_service.py`
-- `backend/app/services/entity_service.py`
-- `backend/app/models/entity.py`
-
-### 3. Knowledge Card 생성
-
-Knowledge card는 원문 chunk 목록이 아니라 entity 중심 요약이어야 한다.
-
-보완 기준:
-
-- entity mention chunk와 주변 context를 모아 context pack을 만든다.
-- LLM으로 정의, 역할, 관련 구성요소, debugging 단서, 근거를 생성한다.
-- 생성 결과는 JSON schema로 검증한다.
-- 근거에는 `document_id`, `page_number`, `chunk_id`를 포함한다.
-- raw chunk는 카드 하단 evidence로 노출한다.
-
-관련 모듈:
-
-- `backend/app/services/entity_service.py`
-- `backend/app/prompts/summary.md`
-- `backend/app/schemas/entity.py`
-
-### 4. Relation/Graph 생성
-
-Graph는 co-mention edge만으로 만들면 연결 수가 많고 의미가 약하다. typed relation을 저장하고, co-mention은 보조 신호로 사용한다.
-
-보완 기준:
-
-- relation type과 confidence를 저장한다.
-- source chunk/page/evidence snippet을 저장한다.
-- graph API는 edge type, confidence, evidence를 반환한다.
-- 낮은 confidence edge는 기본 graph에서 숨긴다.
-
-관련 모듈:
-
-- `backend/app/models/graph.py`
-- `backend/app/services/graph_service.py`
-- `backend/app/workers/ingestion_worker.py`
+과거 job처럼 `job_type`이 없으면 worker는 기본적으로 `ingestion`으로 처리한다.
 
 ## Job Metadata
 
-진행률과 디버깅을 위해 job metadata에 다음 값을 누적한다.
+진행률과 디버깅을 위해 job metadata에 값을 누적한다.
 
+Ingestion metadata:
+
+- `job_type = "ingestion"`
 - `total_pages`
 - `processed_pages`
 - `failed_pages`
 - `timeout_pages`
 - `total_chunks`
 - `processed_chunks`
+- `current_page`
+- `current_page_chunks`
 - `entity_candidates`
-- `entities_saved`
-- `relations_saved`
-- `knowledge_cards_generated`
+- `entities_accepted`
+- `entities_rejected`
+- `entity_mentions`
+- `cancel_requested`
+- `stage`
+
+Refinement metadata:
+
+- `job_type = "llm_refinement"`
+- `total_entities`
+- `processed_entities`
+- `failed_entities`
+- `current_entity_id`
+- `current_entity_name`
+- `entity_failures`
 - `cancel_requested`
 - `stage`
 
@@ -171,18 +144,31 @@ extracting_pdf
 chunking
 embedding
 extracting_knowledge
+refining_entities
 completed
 partially_processed
 failed
 canceled
 ```
 
-`partially_processed`는 일부 페이지가 `timeout` 또는 `failed`로 기록되었지만, 나머지 페이지/청크/검색 데이터는 사용 가능한 상태다.
+`partially_processed`는 일부 페이지 또는 일부 entity refinement가 실패했지만, 성공한 데이터는 사용할 수 있는 상태다.
 
-## 구현 우선순위
+## 안정성 기준
 
-1. entity filtering/ranking 개선
-2. knowledge card용 context aggregation 추가
-3. LLM 기반 knowledge card 생성
-4. typed relation extraction 추가
-5. graph API/UI 필터링 개선
+- upload API는 PDF 저장과 job 생성까지만 수행한다.
+- page extraction은 child process timeout 경계 안에서 실행한다.
+- page/chunk 저장은 페이지 단위로 commit한다.
+- chunking은 반드시 forward progress를 보장해야 한다.
+- entity extraction은 upload ingestion 중 LLM을 호출하지 않는다.
+- LLM refinement는 entity 단위로 commit한다.
+- LLM 호출 중 DB transaction을 오래 잡지 않는다.
+- cancel 요청은 page extraction 또는 entity refinement 사이에서 확인한다.
+
+## 다음 고도화 우선순위
+
+1. refinement job 재처리 API 또는 CLI 추가
+2. refinement prompt/model version metadata 저장
+3. section-aware context aggregation
+4. entity filtering/ranking 개선
+5. typed relation extraction job 추가
+6. graph API/UI 필터링 개선

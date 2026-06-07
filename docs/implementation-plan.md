@@ -72,7 +72,10 @@ app/
 
 - FastAPI upload endpoint는 파일 저장과 job 생성까지만 수행한다.
 - 별도 ingestion worker 프로세스가 `queued` job을 claim해서 PDF 처리, embedding, rule 기반 entity 추출을 순차 실행한다.
-- LLM entity validation은 ingestion 안정성을 위해 별도 스위치(`ENABLE_LLM_ENTITY_VALIDATION_ON_INGESTION`)가 켜진 경우에만 upload ingestion 중 실행한다.
+- upload ingestion 중에는 LLM을 호출하지 않는다. ingestion은 rule/pattern entity 저장까지만 수행한다.
+- ingestion 완료 후 같은 document에 대해 `llm_refinement` job을 자동 생성한다.
+- worker는 `processing_jobs.extra_metadata.job_type`을 보고 `ingestion`과 `llm_refinement`를 라우팅한다.
+- `llm_refinement` job은 entity description과 knowledge card summary를 생성/갱신한다.
 - 작업 상태는 `processing_jobs`에 저장한다.
 
 상태값:
@@ -84,6 +87,7 @@ extracting_pdf
 chunking
 embedding
 extracting_knowledge
+refining_entities
 completed
 partially_processed
 failed
@@ -385,7 +389,7 @@ MVP:
 - Prometheus/Grafana
 - alerting
 
-## MVP 이후 보완: 지식 정제 Pipeline
+## 고도화: 지식 정제 Pipeline
 
 브라우저 검증 결과, entity/knowledge card/graph 화면에서 다음 문제가 확인되었다.
 
@@ -393,26 +397,37 @@ MVP:
 - knowledge card가 chunk 원문 중심이라 개념 설명으로 부족하다.
 - graph가 co-mention 중심이라 edge가 많고 관계 의미가 약하다.
 
-따라서 MVP 이후 구현은 다음 pipeline을 우선 보완한다.
+현재 구현된 흐름:
+
+```text
+upload ingestion
+  -> entity candidate extraction
+  -> rule/pattern entity persistence
+  -> automatic llm_refinement job
+  -> entity-centric snippet aggregation
+  -> LLM knowledge card generation
+  -> entities.description and entities.extra_metadata["knowledge_card"] update
+```
+
+남은 고도화 pipeline:
 
 ```text
 section-aware chunking
-  -> entity candidate extraction
   -> entity normalization/filtering/ranking
-  -> LLM entity validation
-  -> entity-centric context aggregation
-  -> knowledge card generation
+  -> richer entity-centric context aggregation
+  -> LLM refinement retry/reprocess policy
   -> typed relation extraction
   -> graph API/UI filtering
 ```
 
 우선순위:
 
-1. `entity_extraction_service`에서 stopword, type allowlist, confidence, ranking을 개선한다.
-2. `entity_service`에서 entity별 context aggregation과 knowledge card summary를 생성한다.
-3. `ingestion_worker`에서 LLM 기반 entity validation/card/relation 생성 단계를 추가한다.
-4. `graph_service`에서 co-mention 중심 응답을 typed edge, confidence, evidence 중심으로 바꾼다.
-5. frontend entity/card/graph UI에서 filter, summary, evidence, edge 설명을 제공한다.
+1. `knowledge_refinement_service`에서 prompt/model version metadata를 저장한다.
+2. `refinement_worker`에서 재처리/재시도 정책을 추가한다.
+3. `entity_extraction_service`에서 stopword, type allowlist, confidence, ranking을 개선한다.
+4. entity별 context aggregation을 snippet 중심에서 section/chunk 중심으로 개선한다.
+5. `graph_service`에서 co-mention 중심 응답을 typed edge, confidence, evidence 중심으로 바꾼다.
+6. frontend entity/card/graph UI에서 refinement status, summary, evidence, edge 설명을 제공한다.
 
 상세 기준은 다음 문서를 따른다.
 
