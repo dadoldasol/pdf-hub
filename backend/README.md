@@ -39,7 +39,55 @@ alembic upgrade head
 
 If `python` is not available on Windows, use an installed Python launcher or the project-specific Python executable available in your environment.
 
-## Run Server
+## Run Dev Services
+
+From the project root, start the backend API, ingestion worker, and frontend together.
+
+Windows PowerShell:
+
+```powershell
+.\scripts\dev.cmd start
+```
+
+Ubuntu/bash:
+
+```bash
+bash scripts/dev.sh start
+```
+
+To also start the local PostgreSQL container, add the PostgreSQL flag.
+
+Windows PowerShell:
+
+```powershell
+.\scripts\dev.cmd start --with-postgres
+```
+
+Ubuntu/bash:
+
+```bash
+bash scripts/dev.sh start --with-postgres
+```
+
+Useful commands:
+
+```powershell
+.\scripts\dev.cmd status
+.\scripts\dev.cmd logs
+.\scripts\dev.cmd restart
+.\scripts\dev.cmd stop
+```
+
+```bash
+bash scripts/dev.sh status
+bash scripts/dev.sh logs
+bash scripts/dev.sh restart
+bash scripts/dev.sh stop
+```
+
+The script writes process IDs and logs under `.dev/`, which is ignored by Git.
+
+## Run Server Manually
 
 From the `backend` directory:
 
