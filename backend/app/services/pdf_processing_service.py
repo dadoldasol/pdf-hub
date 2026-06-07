@@ -1,4 +1,4 @@
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from multiprocessing import get_context
 from multiprocessing.queues import Queue
@@ -228,16 +228,20 @@ class PdfProcessingService:
         return str(payload)
 
     def chunk_text(self, text: str) -> list[str]:
+        return list(self.iter_chunks(text))
+
+    def iter_chunks(self, text: str) -> Iterable[str]:
         normalized = "\n".join(line.rstrip() for line in text.splitlines()).strip()
         if not normalized:
-            return []
+            return
 
         if len(normalized) <= self.chunk_size:
-            return [normalized]
+            yield normalized
+            return
 
-        chunks: list[str] = []
         start = 0
         text_length = len(normalized)
+        overlap = max(min(self.chunk_overlap, self.chunk_size - 1), 0)
 
         while start < text_length:
             end = min(start + self.chunk_size, text_length)
@@ -247,19 +251,20 @@ class PdfProcessingService:
                     split_at = normalized.rfind("\n", start, end)
                 if split_at == -1 or split_at <= start:
                     split_at = normalized.rfind(" ", start, end)
-                if split_at > start:
+                if split_at > start + overlap:
                     end = split_at
 
             chunk = normalized[start:end].strip()
             if chunk:
-                chunks.append(chunk)
+                yield chunk
 
             if end >= text_length:
                 break
 
-            start = max(end - self.chunk_overlap, 0)
-
-        return chunks
+            next_start = max(end - overlap, 0)
+            if next_start <= start:
+                next_start = end
+            start = next_start
 
 
 def _extract_page_text_worker(

@@ -210,3 +210,14 @@ def test_iter_pages_skips_requested_pages(tmp_path: Path) -> None:
 
     assert [page.page_number for page in pages] == [2]
     assert pages[0].text == "second"
+
+
+def test_chunk_text_always_advances_when_split_is_inside_overlap() -> None:
+    service = PdfProcessingService(chunk_size=100, chunk_overlap=80, page_timeout_seconds=0)
+    text = "short\n" + ("x" * 500)
+
+    chunks = service.chunk_text(text)
+
+    assert chunks
+    assert "".join(chunk.replace("\n", "") for chunk in chunks).count("x") >= 500
+    assert all(len(chunk) <= service.chunk_size for chunk in chunks)

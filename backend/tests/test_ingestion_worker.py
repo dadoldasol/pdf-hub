@@ -174,6 +174,65 @@ def test_ingestion_marks_document_partially_processed_for_failed_pages(
         db_session.commit()
 
 
+def test_ingestion_commits_chunking_progress_for_large_pages(
+    db_session,
+    document,
+    monkeypatch,
+) -> None:
+    class FakePdfProcessingService:
+        def get_page_count(self, pdf_path):  # noqa: ANN001
+            return 1
+
+        def iter_pages(self, pdf_path, before_page=None, skip_pages=None, cancel_check=None):  # noqa: ANN001, ARG002
+            if before_page is not None:
+                before_page(1)
+            yield SimpleNamespace(
+                page_number=1,
+                text="large page text",
+                needs_ocr=False,
+                extraction_seconds=0.01,
+                extraction_status="completed",
+                extraction_error=None,
+            )
+
+        def chunk_text(self, text):  # noqa: ANN001
+            return [f"chunk {index}" for index in range(5)]
+
+    document.storage_path = "fake.pdf"
+    document.status = "uploaded"
+    job = ProcessingJob(document_id=document.id, status="queued", extra_metadata={})
+    db_session.add(job)
+    db_session.commit()
+    monkeypatch.setattr(ingestion_worker, "PdfProcessingService", FakePdfProcessingService)
+    monkeypatch.setattr(ingestion_worker.settings, "ingestion_batch_chunks", 2)
+    monkeypatch.setattr(ingestion_worker.settings, "enable_embeddings_on_upload", False)
+
+    try:
+        run_ingestion_job(job.id)
+
+        db_session.refresh(document)
+        db_session.refresh(job)
+        chunks = list(
+            db_session.query(DocumentChunk)
+            .filter(DocumentChunk.document_id == document.id)
+            .order_by(DocumentChunk.chunk_index)
+        )
+
+        assert document.status == "processed"
+        assert job.status == "completed"
+        assert len(chunks) == 5
+        assert job.extra_metadata["total_chunks"] == 5
+        assert job.extra_metadata["current_page_chunks"] == 5
+        assert job.extra_metadata["chunk_progress_updates"] == 2
+    finally:
+        db_session.execute(delete(EntityMention).where(EntityMention.document_id == document.id))
+        db_session.execute(delete(DocumentChunk).where(DocumentChunk.document_id == document.id))
+        db_session.execute(delete(DocumentPage).where(DocumentPage.document_id == document.id))
+        db_session.execute(delete(ProcessingJob).where(ProcessingJob.id == job.id))
+        db_session.delete(document)
+        db_session.commit()
+
+
 def test_ingestion_resume_keeps_completed_pages_and_processes_remaining(
     db_session,
     document,

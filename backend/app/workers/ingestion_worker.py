@@ -206,9 +206,19 @@ def _extract_pages_and_chunks(
             if page.extraction_status == "timeout":
                 timeout_pages += 1
 
-        _set_job_progress(job, "chunking", stage="chunking", current_page=page.page_number)
+        _set_job_progress(
+            job,
+            "chunking",
+            stage="chunking",
+            current_page=page.page_number,
+            current_page_chunks=0,
+        )
         chunk_started_at = perf_counter()
-        for chunk_text in pdf_service.chunk_text(page.text):
+        page_chunk_count = 0
+        chunk_progress_updates = int((job.extra_metadata or {}).get("chunk_progress_updates") or 0)
+        chunk_progress_interval = max(settings.ingestion_batch_chunks, 1)
+        iter_chunks = getattr(pdf_service, "iter_chunks", pdf_service.chunk_text)
+        for chunk_text in iter_chunks(page.text):
             db.add(
                 DocumentChunk(
                     document_id=document.id,
@@ -221,6 +231,24 @@ def _extract_pages_and_chunks(
                 )
             )
             chunk_index += 1
+            page_chunk_count += 1
+
+            if page_chunk_count % chunk_progress_interval == 0:
+                chunk_progress_updates += 1
+                _set_job_progress(
+                    job,
+                    "chunking",
+                    processed_pages=page.page_number - 1,
+                    failed_pages=failed_pages,
+                    timeout_pages=timeout_pages,
+                    total_chunks=chunk_index,
+                    current_page=page.page_number,
+                    current_page_chunks=page_chunk_count,
+                    current_page_status="chunking",
+                    chunk_progress_updates=chunk_progress_updates,
+                )
+                db.commit()
+                _raise_if_canceled(db, job)
 
         _set_job_progress(
             job,
@@ -229,6 +257,7 @@ def _extract_pages_and_chunks(
             failed_pages=failed_pages,
             timeout_pages=timeout_pages,
             total_chunks=chunk_index,
+            current_page_chunks=page_chunk_count,
             current_page_status=page.extraction_status,
             last_chunk_seconds=round(perf_counter() - chunk_started_at, 3),
         )
