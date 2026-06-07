@@ -17,6 +17,17 @@ class DocumentDeleteResponse(BaseModel):
     deleted: bool
 
 
+class DocumentRefineRequest(BaseModel):
+    force: bool = False
+
+
+class DocumentRefineResponse(BaseModel):
+    document_id: UUID
+    job_id: UUID
+    status: str
+    duplicate: bool = False
+
+
 class DocumentListItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

@@ -135,6 +135,14 @@ http://127.0.0.1:5173
 
 Upload ingestion stores rule/pattern entities only so PDF processing remains stable. After ingestion completes, the worker automatically queues a separate `llm_refinement` job for the same document. That refinement job can use an LLM to improve entity descriptions and knowledge card summaries without blocking upload ingestion.
 
+To manually queue refinement for an existing document:
+
+```text
+POST /api/documents/{document_id}/refine
+```
+
+If a refinement job is already queued or running, the existing job is returned. If the latest refinement already finished, pass `{"force": true}` to queue a new refinement job.
+
 For local Ollama refinement, set:
 
 ```env
@@ -172,6 +180,7 @@ GET  /api/documents
 GET  /api/documents/{document_id}
 GET  /api/documents/{document_id}/pages/{page_number}
 DELETE /api/documents/{document_id}
+POST /api/documents/{document_id}/refine
 POST /api/search
 GET  /api/entities
 GET  /api/entities/{entity_id}

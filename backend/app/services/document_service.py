@@ -13,6 +13,9 @@ from app.models.job import ProcessingJob
 from app.services.storage_service import StorageService
 
 
+TERMINAL_JOB_STATUSES = {"completed", "partially_processed", "failed", "canceled"}
+
+
 class DocumentService:
     def __init__(self, db: Session) -> None:
         self.db = db
@@ -66,6 +69,44 @@ class DocumentService:
 
     def get_job(self, job_id: UUID) -> ProcessingJob | None:
         return self.db.get(ProcessingJob, job_id)
+
+    def create_refinement_job(
+        self,
+        document_id: UUID,
+        *,
+        force: bool = False,
+        source: str = "manual",
+    ) -> tuple[ProcessingJob | None, bool]:
+        document = self.get_document(document_id)
+        if document is None:
+            return None, False
+
+        refinement_jobs = [
+            job
+            for job in self.db.scalars(select(ProcessingJob).where(ProcessingJob.document_id == document_id))
+            if (job.extra_metadata or {}).get("job_type") == "llm_refinement"
+        ]
+        for job in refinement_jobs:
+            if job.status not in TERMINAL_JOB_STATUSES:
+                return job, True
+
+        if refinement_jobs and not force:
+            latest_job = max(refinement_jobs, key=lambda job: job.created_at)
+            return latest_job, True
+
+        job = ProcessingJob(
+            document_id=document_id,
+            status="queued",
+            extra_metadata={
+                "job_type": "llm_refinement",
+                "stage": "queued",
+                "source": source,
+            },
+        )
+        self.db.add(job)
+        self.db.commit()
+        self.db.refresh(job)
+        return job, False
 
     def delete_document(self, document_id: UUID) -> bool:
         document = self.get_document(document_id)

@@ -44,6 +44,7 @@ def run_llm_refinement_job(job_id: UUID) -> None:
                     job_id,
                     target,
                     result,
+                    service,
                     processed_entities,
                     failed_entities,
                     failure_messages,
@@ -170,6 +171,7 @@ def _save_refinement_result(
     job_id: UUID,
     target: RefinementTarget,
     result: KnowledgeCardRefinement,
+    service: KnowledgeRefinementService,
     processed_entities: int,
     failed_entities: int,
     failure_messages: list[str],
@@ -193,6 +195,9 @@ def _save_refinement_result(
             metadata["llm_refinement"] = {
                 "accepted": result.accepted,
                 "confidence": result.confidence,
+                "provider": service.provider,
+                "model": service.model,
+                "prompt_version": service.PROMPT_VERSION,
                 "refined_at": datetime.now(UTC).isoformat(),
                 "source_snippet_count": len(target.snippets),
             }

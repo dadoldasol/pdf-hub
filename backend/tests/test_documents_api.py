@@ -39,3 +39,48 @@ def test_upload_creates_queued_job_without_running_ingestion(
         assert job.status == "queued"
     finally:
         DocumentService(db_session).delete_document(document_id)
+
+
+def test_refine_document_creates_refinement_job(db_session, document) -> None:
+    client = TestClient(app)
+    db_session.commit()
+
+    try:
+        response = client.post(f"/api/documents/{document.id}/refine")
+
+        assert response.status_code == 202
+        payload = response.json()
+        job = db_session.get(ProcessingJob, UUID(payload["job_id"]))
+
+        assert payload["document_id"] == str(document.id)
+        assert payload["status"] == "queued"
+        assert payload["duplicate"] is False
+        assert job is not None
+        assert job.extra_metadata["job_type"] == "llm_refinement"
+        assert job.extra_metadata["source"] == "manual_api"
+    finally:
+        DocumentService(db_session).delete_document(document.id)
+
+
+def test_refine_document_reuses_completed_job_unless_forced(db_session, document) -> None:
+    client = TestClient(app)
+    completed_job = ProcessingJob(
+        document_id=document.id,
+        status="completed",
+        extra_metadata={"job_type": "llm_refinement"},
+    )
+    db_session.add(completed_job)
+    db_session.commit()
+
+    try:
+        reuse_response = client.post(f"/api/documents/{document.id}/refine")
+        force_response = client.post(f"/api/documents/{document.id}/refine", json={"force": True})
+
+        assert reuse_response.status_code == 202
+        assert force_response.status_code == 202
+        assert UUID(reuse_response.json()["job_id"]) == completed_job.id
+        assert reuse_response.json()["duplicate"] is True
+        assert UUID(force_response.json()["job_id"]) != completed_job.id
+        assert force_response.json()["duplicate"] is False
+    finally:
+        DocumentService(db_session).delete_document(document.id)

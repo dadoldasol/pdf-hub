@@ -37,7 +37,9 @@ def test_list_entities_excludes_orphans(db_session, document, document_chunk) ->
 
         entities = EntityService(db_session).list_entities()
 
-        assert [entity.normalized_name for entity in entities] == ["IFE"]
+        entity_ids = {entity.id for entity in entities}
+        assert sourced.id in entity_ids
+        assert orphan.id not in entity_ids
         assert EntityService(db_session).get_entity(orphan.id) is None
     finally:
         db_session.execute(delete(EntityMention).where(EntityMention.entity_id.in_([sourced.id, orphan.id])))

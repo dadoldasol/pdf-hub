@@ -59,6 +59,7 @@ app/
 | GET | `/api/documents` | 문서 목록 |
 | GET | `/api/documents/{document_id}` | 문서 상세 |
 | GET | `/api/documents/{document_id}/pages/{page_number}` | 페이지 원문 텍스트 |
+| POST | `/api/documents/{document_id}/refine` | LLM refinement job 수동 생성/재처리 |
 | GET | `/api/jobs/{job_id}` | 처리 상태 |
 | POST | `/api/search` | 검색 |
 | GET | `/api/entities` | 엔티티 목록 |
@@ -76,6 +77,8 @@ app/
 - ingestion 완료 후 같은 document에 대해 `llm_refinement` job을 자동 생성한다.
 - worker는 `processing_jobs.extra_metadata.job_type`을 보고 `ingestion`과 `llm_refinement`를 라우팅한다.
 - `llm_refinement` job은 entity description과 knowledge card summary를 생성/갱신한다.
+- 기존 문서는 `POST /api/documents/{document_id}/refine`로 refinement job을 수동 재생성할 수 있다.
+- refinement 결과에는 provider, model, prompt_version metadata를 저장한다.
 - 작업 상태는 `processing_jobs`에 저장한다.
 
 상태값:
@@ -422,12 +425,11 @@ section-aware chunking
 
 우선순위:
 
-1. `knowledge_refinement_service`에서 prompt/model version metadata를 저장한다.
-2. `refinement_worker`에서 재처리/재시도 정책을 추가한다.
-3. `entity_extraction_service`에서 stopword, type allowlist, confidence, ranking을 개선한다.
-4. entity별 context aggregation을 snippet 중심에서 section/chunk 중심으로 개선한다.
-5. `graph_service`에서 co-mention 중심 응답을 typed edge, confidence, evidence 중심으로 바꾼다.
-6. frontend entity/card/graph UI에서 refinement status, summary, evidence, edge 설명을 제공한다.
+1. `entity_extraction_service`에서 stopword, type allowlist, confidence, ranking을 개선한다.
+2. entity별 context aggregation을 snippet 중심에서 section/chunk 중심으로 개선한다.
+3. `graph_service`에서 co-mention 중심 응답을 typed edge, confidence, evidence 중심으로 바꾼다.
+4. frontend entity/card/graph UI에서 refinement status, summary, evidence, edge 설명을 제공한다.
+5. refinement 결과를 별도 table로 승격해 prompt/model별 이력을 관리한다.
 
 상세 기준은 다음 문서를 따른다.
 

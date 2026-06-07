@@ -73,9 +73,23 @@ llm_refinement worker
 - `entities.description`: entity 설명
 - `entities.confidence`: LLM confidence가 있으면 갱신
 - `entities.extra_metadata["knowledge_card"]`: summary, features, implementation locations, debug keywords, limitations
-- `entities.extra_metadata["llm_refinement"]`: accepted, confidence, refined_at, source_snippet_count
+- `entities.extra_metadata["llm_refinement"]`: accepted, confidence, provider, model, prompt_version, refined_at, source_snippet_count
 
 현재는 별도 `knowledge_cards` 테이블을 만들지 않고 JSONB metadata를 사용한다. versioning, prompt/model 이력, card 재생성 이력이 중요해지면 별도 테이블로 승격한다.
+
+## Manual Refinement
+
+Upload 완료 후 refinement job은 자동 생성된다. 기존 문서에 대해 refinement를 다시 실행해야 할 때는 다음 API를 사용한다.
+
+```text
+POST /api/documents/{document_id}/refine
+```
+
+기본 정책:
+
+- active refinement job이 있으면 새 job을 만들지 않고 기존 job을 반환한다.
+- 완료된 refinement job이 있으면 기본적으로 기존 job을 반환한다.
+- `{"force": true}`를 보내면 완료/실패/취소된 refinement 이후 새 job을 queue한다.
 
 ## Entity 정제 방향
 
@@ -134,9 +148,8 @@ Graph는 co-mention만으로 만들면 edge가 너무 많고 의미가 약하다
 
 ## 다음 우선순위
 
-1. refinement prompt version과 model version을 metadata에 저장한다.
-2. entity별 context aggregation을 snippet 중심에서 chunk/section 중심으로 개선한다.
-3. refinement job 재시도/재처리 정책을 추가한다.
-4. confidence 낮은 entity/card를 UI에서 구분한다.
-5. typed relation extraction job을 추가한다.
-6. graph API가 confidence, edge type, source evidence를 반환하게 한다.
+1. entity별 context aggregation을 snippet 중심에서 chunk/section 중심으로 개선한다.
+2. confidence 낮은 entity/card를 UI에서 구분한다.
+3. typed relation extraction job을 추가한다.
+4. graph API가 confidence, edge type, source evidence를 반환하게 한다.
+5. refinement 결과를 별도 table로 승격해 prompt/model별 이력을 관리한다.

@@ -41,6 +41,10 @@ def test_refinement_worker_updates_entity_description_and_knowledge_card(
     db_session.commit()
 
     class FakeKnowledgeRefinementService:
+        provider = "ollama"
+        model = "test-model"
+        PROMPT_VERSION = "test-prompt-v1"
+
         def refine_entity(self, *, name, entity_type, snippets):  # noqa: ANN001
             assert name == "IFE"
             assert entity_type == "ISP_BLOCK"
@@ -72,6 +76,9 @@ def test_refinement_worker_updates_entity_description_and_knowledge_card(
         assert entity.extra_metadata["knowledge_card"]["summary"] == "IFE handles front-end ISP processing."
         assert entity.extra_metadata["knowledge_card"]["features"] == ["Front-end image processing"]
         assert entity.extra_metadata["llm_refinement"]["accepted"] is True
+        assert entity.extra_metadata["llm_refinement"]["provider"] == "ollama"
+        assert entity.extra_metadata["llm_refinement"]["model"] == "test-model"
+        assert entity.extra_metadata["llm_refinement"]["prompt_version"] == "test-prompt-v1"
     finally:
         db_session.execute(delete(EntityMention).where(EntityMention.document_id == document.id))
         db_session.execute(delete(ProcessingJob).where(ProcessingJob.document_id == document.id))
@@ -114,6 +121,10 @@ def test_refinement_worker_records_entity_failures_and_continues(
     db_session.commit()
 
     class FakeKnowledgeRefinementService:
+        provider = "ollama"
+        model = "test-model"
+        PROMPT_VERSION = "test-prompt-v1"
+
         def refine_entity(self, *, name, entity_type, snippets):  # noqa: ANN001, ARG002
             if name == "CSID":
                 raise RuntimeError("LLM unavailable")

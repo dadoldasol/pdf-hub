@@ -8,6 +8,8 @@ from app.schemas.document import (
     DocumentDeleteResponse,
     DocumentDetail,
     DocumentListItem,
+    DocumentRefineRequest,
+    DocumentRefineResponse,
     DocumentUploadResponse,
     PageDetail,
 )
@@ -46,6 +48,27 @@ async def upload_document(
 @router.get("", response_model=list[DocumentListItem])
 def list_documents(db: Session = Depends(get_db)) -> list[DocumentListItem]:
     return DocumentService(db).list_documents()
+
+
+@router.post("/{document_id}/refine", response_model=DocumentRefineResponse, status_code=status.HTTP_202_ACCEPTED)
+def refine_document(
+    document_id: UUID,
+    request: DocumentRefineRequest | None = None,
+    db: Session = Depends(get_db),
+) -> DocumentRefineResponse:
+    job, duplicate = DocumentService(db).create_refinement_job(
+        document_id,
+        force=bool(request.force) if request is not None else False,
+        source="manual_api",
+    )
+    if job is None:
+        raise HTTPException(status_code=404, detail="Document not found.")
+    return DocumentRefineResponse(
+        document_id=document_id,
+        job_id=job.id,
+        status=job.status,
+        duplicate=duplicate,
+    )
 
 
 @router.get("/{document_id}", response_model=DocumentDetail)

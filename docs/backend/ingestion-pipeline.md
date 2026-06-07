@@ -47,12 +47,22 @@ worker_main
   -> completed / partially_processed / failed
 ```
 
+수동 재처리:
+
+```text
+POST /api/documents/{document_id}/refine
+  -> active llm_refinement job이 있으면 기존 job 반환
+  -> completed/failed/canceled job만 있으면 force 값에 따라 기존 job 재사용 또는 새 job 생성
+```
+
 저장 위치:
 
 - `entities.description`
 - `entities.confidence`
 - `entities.extra_metadata["knowledge_card"]`
 - `entities.extra_metadata["llm_refinement"]`
+
+`llm_refinement` metadata에는 provider, model, prompt_version, refined_at, source_snippet_count를 저장한다.
 
 ## Document Lifecycle 전처리
 
@@ -166,9 +176,8 @@ canceled
 
 ## 다음 고도화 우선순위
 
-1. refinement job 재처리 API 또는 CLI 추가
-2. refinement prompt/model version metadata 저장
-3. section-aware context aggregation
-4. entity filtering/ranking 개선
-5. typed relation extraction job 추가
-6. graph API/UI 필터링 개선
+1. section-aware context aggregation
+2. entity filtering/ranking 개선
+3. typed relation extraction job 추가
+4. graph API/UI 필터링 개선
+5. refinement 이력/versioning을 별도 테이블로 승격

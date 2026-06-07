@@ -157,3 +157,55 @@ def test_delete_document_removes_preexisting_orphan_entities(db_session, documen
 
     assert db_session.get(Entity, orphan_id) is None
     assert db_session.get(KnowledgeNode, orphan_node_id) is None
+
+
+def test_create_refinement_job_reuses_active_job(db_session, document, tmp_path: Path) -> None:
+    service = _document_service(db_session, tmp_path)
+    active_job = ProcessingJob(
+        document_id=document.id,
+        status="queued",
+        extra_metadata={"job_type": "llm_refinement"},
+    )
+    db_session.add(active_job)
+    db_session.commit()
+
+    try:
+        job, duplicate = service.create_refinement_job(document.id, force=True)
+
+        assert duplicate is True
+        assert job.id == active_job.id
+        assert (
+            db_session.query(ProcessingJob)
+            .filter(
+                ProcessingJob.document_id == document.id,
+                ProcessingJob.extra_metadata["job_type"].as_string() == "llm_refinement",
+            )
+            .count()
+            == 1
+        )
+    finally:
+        service.delete_document(document.id)
+
+
+def test_create_refinement_job_force_requeues_after_completed_job(db_session, document, tmp_path: Path) -> None:
+    service = _document_service(db_session, tmp_path)
+    completed_job = ProcessingJob(
+        document_id=document.id,
+        status="completed",
+        extra_metadata={"job_type": "llm_refinement"},
+    )
+    db_session.add(completed_job)
+    db_session.commit()
+
+    try:
+        reused_job, duplicate = service.create_refinement_job(document.id)
+        forced_job, forced_duplicate = service.create_refinement_job(document.id, force=True)
+
+        assert duplicate is True
+        assert reused_job.id == completed_job.id
+        assert forced_duplicate is False
+        assert forced_job.id != completed_job.id
+        assert forced_job.status == "queued"
+        assert forced_job.extra_metadata["job_type"] == "llm_refinement"
+    finally:
+        service.delete_document(document.id)

@@ -19,6 +19,7 @@ class KnowledgeCardRefinement:
 
 
 class KnowledgeRefinementService:
+    PROMPT_VERSION = "knowledge_refinement.v1"
     RESPONSE_SCHEMA: dict[str, Any] = {
         "type": "object",
         "additionalProperties": False,
