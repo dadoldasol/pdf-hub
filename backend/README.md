@@ -14,6 +14,7 @@ FastAPI backend for the PDF Knowledge Hub MVP.
 - Deterministic local embeddings for MVP development
 - pgvector-based vector search
 - Rule/pattern-based entity extraction
+- Automatic post-ingestion LLM refinement jobs for entity descriptions and knowledge cards
 - Entity mentions with source page/snippet
 - Knowledge card API
 - Co-mention graph API
@@ -130,9 +131,11 @@ Open:
 http://127.0.0.1:5173
 ```
 
-## LLM Entity Validation
+## LLM Refinement
 
-Ingestion uses rule/pattern candidates by default. To validate candidates with an LLM in non-ingestion validation code, set:
+Upload ingestion stores rule/pattern entities only so PDF processing remains stable. After ingestion completes, the worker automatically queues a separate `llm_refinement` job for the same document. That refinement job can use an LLM to improve entity descriptions and knowledge card summaries without blocking upload ingestion.
+
+For local Ollama refinement, set:
 
 ```env
 ENABLE_LLM_ENTITY_VALIDATION=true
@@ -141,14 +144,6 @@ ENTITY_VALIDATION_MODEL=qwen3:8b
 OLLAMA_BASE_URL=http://localhost:11434
 OPENAI_API_KEY=ollama
 ```
-
-Upload ingestion does not call the LLM unless this separate switch is also enabled:
-
-```env
-ENABLE_LLM_ENTITY_VALIDATION_ON_INGESTION=true
-```
-
-Keep it disabled when validating large PDF ingestion stability.
 
 For local Ollama, install and pull the recommended 8B model:
 
@@ -194,7 +189,7 @@ GET  /api/graph/entities/{entity_id}
 ## Current MVP Limits
 
 - Embeddings are deterministic local vectors, not production semantic embeddings.
-- Entity extraction starts with rule/pattern candidates; optional LLM validation can filter and classify candidates.
-- Upload ingestion keeps LLM validation disabled by default to protect large PDF processing stability.
+- Entity extraction starts with rule/pattern candidates; LLM refinement runs afterward as a separate worker job.
+- Upload ingestion does not call the LLM, which protects large PDF processing stability.
 - OCR, table extraction, LLM summarization, and advanced relation extraction are deferred.
 - Graph edges are generated dynamically from co-mentions rather than persisted as inferred relations.

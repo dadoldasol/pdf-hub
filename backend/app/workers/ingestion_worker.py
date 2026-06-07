@@ -86,6 +86,7 @@ def run_ingestion_job(job_id: UUID) -> None:
         )
         job.finished_at = datetime.now(UTC)
         document.status = final_status if final_status == "partially_processed" else "processed"
+        _enqueue_refinement_job(db, document.id)
         db.commit()
     except (JobCanceled, PdfPageExtractionCanceled):
         db.rollback()
@@ -322,9 +323,7 @@ def _extract_entities(db: Session, job: ProcessingJob, document_id: UUID, chunk_
     db.commit()
 
     extraction_service = EntityExtractionService()
-    validation_service = EntityValidationService(
-        enabled=settings.enable_llm_entity_validation_on_ingestion,
-    )
+    validation_service = EntityValidationService(enabled=False)
     db.execute(delete(EntityMention).where(EntityMention.document_id == document_id))
     db.commit()
     _raise_if_canceled(db, job)
@@ -402,6 +401,29 @@ def _delete_page_artifacts(db: Session, document_id: UUID, page_number: int) -> 
             DocumentPage.page_number == page_number,
         )
     )
+
+
+def _enqueue_refinement_job(db: Session, document_id: UUID) -> ProcessingJob | None:
+    existing_jobs = db.scalars(select(ProcessingJob).where(ProcessingJob.document_id == document_id))
+    for existing_job in existing_jobs:
+        metadata = existing_job.extra_metadata or {}
+        if metadata.get("job_type") != "llm_refinement":
+            continue
+        if existing_job.status not in {"completed", "failed", "canceled"}:
+            return None
+
+    job = ProcessingJob(
+        document_id=document_id,
+        status="queued",
+        extra_metadata={
+            "job_type": "llm_refinement",
+            "stage": "queued",
+            "source": "automatic_after_ingestion",
+        },
+    )
+    db.add(job)
+    db.flush()
+    return job
 
 
 def _set_job_progress(job: ProcessingJob, status: str, **metadata_updates: object) -> None:

@@ -6,7 +6,8 @@ from app.models.chunk import DocumentChunk
 from app.models.document import DocumentPage
 from app.models.entity import EntityMention
 from app.models.job import ProcessingJob
-from app.workers import ingestion_worker
+from app.services.entity_validation_service import EntityValidationResult
+from app.workers import ingestion_worker, worker_main
 from app.workers.ingestion_worker import run_ingestion_job
 from app.workers.worker_main import claim_next_queued_job
 from app.services.pdf_processing_service import PdfPageExtractionCanceled
@@ -31,7 +32,7 @@ def test_ingestion_job_marks_document_failed_for_invalid_pdf_path(db_session, do
         assert job.status == "failed"
         assert job.error_message
     finally:
-        db_session.execute(delete(ProcessingJob).where(ProcessingJob.id == job.id))
+        db_session.execute(delete(ProcessingJob).where(ProcessingJob.document_id == document.id))
         db_session.delete(document)
         db_session.commit()
 
@@ -55,6 +56,36 @@ def test_worker_claims_oldest_queued_job(db_session, document) -> None:
         assert second_job.status == "queued"
     finally:
         db_session.execute(delete(ProcessingJob).where(ProcessingJob.id.in_([first_job.id, second_job.id])))
+        db_session.delete(document)
+        db_session.commit()
+
+
+def test_worker_routes_refinement_jobs(db_session, document, monkeypatch) -> None:
+    job = ProcessingJob(
+        document_id=document.id,
+        status="queued",
+        extra_metadata={"job_type": "llm_refinement"},
+    )
+    db_session.add(job)
+    db_session.commit()
+    called_job_ids = []
+
+    def fake_run_llm_refinement_job(job_id):  # noqa: ANN001
+        called_job_ids.append(job_id)
+        claimed_job = db_session.get(ProcessingJob, job_id)
+        claimed_job.status = "completed"
+        db_session.commit()
+
+    monkeypatch.setattr(worker_main, "run_llm_refinement_job", fake_run_llm_refinement_job)
+
+    try:
+        assert worker_main.run_worker_once("test-worker") is True
+
+        db_session.refresh(job)
+        assert called_job_ids == [job.id]
+        assert job.status == "completed"
+    finally:
+        db_session.execute(delete(ProcessingJob).where(ProcessingJob.document_id == document.id))
         db_session.delete(document)
         db_session.commit()
 
@@ -112,7 +143,7 @@ def test_ingestion_commits_each_page_before_later_extraction_failure(
         db_session.execute(delete(EntityMention).where(EntityMention.document_id == document.id))
         db_session.execute(delete(DocumentChunk).where(DocumentChunk.document_id == document.id))
         db_session.execute(delete(DocumentPage).where(DocumentPage.document_id == document.id))
-        db_session.execute(delete(ProcessingJob).where(ProcessingJob.id == job.id))
+        db_session.execute(delete(ProcessingJob).where(ProcessingJob.document_id == document.id))
         db_session.delete(document)
         db_session.commit()
 
@@ -169,7 +200,74 @@ def test_ingestion_marks_document_partially_processed_for_failed_pages(
         db_session.execute(delete(EntityMention).where(EntityMention.document_id == document.id))
         db_session.execute(delete(DocumentChunk).where(DocumentChunk.document_id == document.id))
         db_session.execute(delete(DocumentPage).where(DocumentPage.document_id == document.id))
-        db_session.execute(delete(ProcessingJob).where(ProcessingJob.id == job.id))
+        db_session.execute(delete(ProcessingJob).where(ProcessingJob.document_id == document.id))
+        db_session.delete(document)
+        db_session.commit()
+
+
+def test_ingestion_uses_rule_entities_and_enqueues_refinement_job(
+    db_session,
+    document,
+    monkeypatch,
+) -> None:
+    class FakePdfProcessingService:
+        def get_page_count(self, pdf_path):  # noqa: ANN001
+            return 1
+
+        def iter_pages(self, pdf_path, before_page=None, skip_pages=None, cancel_check=None):  # noqa: ANN001, ARG002
+            if before_page is not None:
+                before_page(1)
+            yield SimpleNamespace(
+                page_number=1,
+                text="IFE and ISP appear in this tuning guide.",
+                needs_ocr=False,
+                extraction_seconds=0.01,
+                extraction_status="completed",
+                extraction_error=None,
+            )
+
+        def chunk_text(self, text):  # noqa: ANN001
+            return [text]
+
+    class FakeValidationService:
+        seen_enabled: bool | None = None
+
+        def __init__(self, enabled=None):  # noqa: ANN001
+            FakeValidationService.seen_enabled = enabled
+
+        def validate_candidates(self, candidates, context):  # noqa: ANN001, ARG002
+            return EntityValidationResult(accepted_candidates=candidates)
+
+    document.storage_path = "fake.pdf"
+    document.status = "uploaded"
+    job = ProcessingJob(document_id=document.id, status="queued", extra_metadata={"job_type": "ingestion"})
+    db_session.add(job)
+    db_session.commit()
+    monkeypatch.setattr(ingestion_worker, "PdfProcessingService", FakePdfProcessingService)
+    monkeypatch.setattr(ingestion_worker, "EntityValidationService", FakeValidationService)
+    monkeypatch.setattr(ingestion_worker.settings, "enable_embeddings_on_upload", False)
+
+    try:
+        run_ingestion_job(job.id)
+
+        db_session.refresh(document)
+        db_session.refresh(job)
+        refinement_jobs = [
+            queued_job
+            for queued_job in db_session.query(ProcessingJob).filter(ProcessingJob.document_id == document.id)
+            if (queued_job.extra_metadata or {}).get("job_type") == "llm_refinement"
+        ]
+
+        assert FakeValidationService.seen_enabled is False
+        assert document.status == "processed"
+        assert job.status == "completed"
+        assert len(refinement_jobs) == 1
+        assert refinement_jobs[0].status == "queued"
+    finally:
+        db_session.execute(delete(EntityMention).where(EntityMention.document_id == document.id))
+        db_session.execute(delete(DocumentChunk).where(DocumentChunk.document_id == document.id))
+        db_session.execute(delete(DocumentPage).where(DocumentPage.document_id == document.id))
+        db_session.execute(delete(ProcessingJob).where(ProcessingJob.document_id == document.id))
         db_session.delete(document)
         db_session.commit()
 
@@ -228,7 +326,7 @@ def test_ingestion_commits_chunking_progress_for_large_pages(
         db_session.execute(delete(EntityMention).where(EntityMention.document_id == document.id))
         db_session.execute(delete(DocumentChunk).where(DocumentChunk.document_id == document.id))
         db_session.execute(delete(DocumentPage).where(DocumentPage.document_id == document.id))
-        db_session.execute(delete(ProcessingJob).where(ProcessingJob.id == job.id))
+        db_session.execute(delete(ProcessingJob).where(ProcessingJob.document_id == document.id))
         db_session.delete(document)
         db_session.commit()
 
@@ -308,7 +406,7 @@ def test_ingestion_resume_keeps_completed_pages_and_processes_remaining(
         db_session.execute(delete(EntityMention).where(EntityMention.document_id == document.id))
         db_session.execute(delete(DocumentChunk).where(DocumentChunk.document_id == document.id))
         db_session.execute(delete(DocumentPage).where(DocumentPage.document_id == document.id))
-        db_session.execute(delete(ProcessingJob).where(ProcessingJob.id == job.id))
+        db_session.execute(delete(ProcessingJob).where(ProcessingJob.document_id == document.id))
         db_session.delete(document)
         db_session.commit()
 
@@ -345,6 +443,6 @@ def test_ingestion_marks_job_canceled_when_page_extraction_is_canceled(
         assert job.status == "canceled"
         assert job.extra_metadata["stage"] == "canceled"
     finally:
-        db_session.execute(delete(ProcessingJob).where(ProcessingJob.id == job.id))
+        db_session.execute(delete(ProcessingJob).where(ProcessingJob.document_id == document.id))
         db_session.delete(document)
         db_session.commit()

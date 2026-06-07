@@ -40,7 +40,7 @@ class DocumentService:
         self.db.add(document)
         self.db.flush()
 
-        job = ProcessingJob(document_id=document.id, status="queued", extra_metadata={})
+        job = ProcessingJob(document_id=document.id, status="queued", extra_metadata={"job_type": "ingestion"})
         self.db.add(job)
         self.db.commit()
         self.db.refresh(document)

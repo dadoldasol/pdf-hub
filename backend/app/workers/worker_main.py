@@ -10,6 +10,7 @@ from app.core.config import settings
 from app.db.session import SessionLocal
 from app.models.job import ProcessingJob
 from app.workers.ingestion_worker import run_ingestion_job
+from app.workers.refinement_worker import run_llm_refinement_job
 
 
 def claim_next_queued_job(worker_id: str | None = None) -> UUID | None:
@@ -44,8 +45,22 @@ def run_worker_once(worker_id: str | None = None) -> bool:
     if job_id is None:
         return False
 
-    run_ingestion_job(job_id)
+    if get_job_type(job_id) == "llm_refinement":
+        run_llm_refinement_job(job_id)
+    else:
+        run_ingestion_job(job_id)
     return True
+
+
+def get_job_type(job_id: UUID) -> str:
+    db = SessionLocal()
+    try:
+        job = db.get(ProcessingJob, job_id)
+        if job is None:
+            return "ingestion"
+        return str((job.extra_metadata or {}).get("job_type") or "ingestion")
+    finally:
+        db.close()
 
 
 def run_worker_loop(

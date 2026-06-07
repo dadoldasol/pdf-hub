@@ -56,15 +56,22 @@ class EntityService:
             for mention, document_title in mention_rows
         ]
 
+        knowledge_card = (entity.extra_metadata or {}).get("knowledge_card") or {}
+
         return KnowledgeCard(
             entity=entity,
-            summary=entity.description or self._fallback_summary(entity, len(source_pages)),
-            features=[],
-            implementation_locations=[],
-            debug_keywords=[],
-            limitations=[],
+            summary=knowledge_card.get("summary") or entity.description or self._fallback_summary(entity, len(source_pages)),
+            features=self._metadata_list(knowledge_card.get("features")),
+            implementation_locations=self._metadata_list(knowledge_card.get("implementation_locations")),
+            debug_keywords=self._metadata_list(knowledge_card.get("debug_keywords")),
+            limitations=self._metadata_list(knowledge_card.get("limitations")),
             source_pages=source_pages,
         )
 
     def _fallback_summary(self, entity: Entity, mention_count: int) -> str:
         return f"{entity.name} is a {entity.entity_type} entity found in {mention_count} source page(s)."
+
+    def _metadata_list(self, value: object) -> list[str]:
+        if not isinstance(value, list):
+            return []
+        return [str(item) for item in value if str(item).strip()]
